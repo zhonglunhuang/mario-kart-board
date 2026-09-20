@@ -382,6 +382,7 @@ socket.on('connect_error', () => {
 });
 
 /* ---------- 啟動 ---------- */
+window.__debug = { state, DEFS };
 loadProfile();
 $('#in-name').value = state.me.name;
 renderPickers();

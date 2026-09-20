@@ -312,7 +312,7 @@ export class RaceScene {
 
     // 護欄（Racing Kit barrier，紅白交錯，InstancedMesh）
     const bSize = propSize('racing', 'barrierRed');
-    const bScale = 1.1 / bSize.y;
+    const bScale = 0.55 / bSize.y;
     const bLen = bSize.x * bScale;
     const red = [];
     const white = [];
@@ -341,10 +341,10 @@ export class RaceScene {
     this.scene.add(line);
     const gate = cloneProp('racing', 'overhead');
     const gSize = propSize('racing', 'overhead');
-    const gScale = (T.width + 6) / gSize.x;
+    const gScale = Math.min((T.width + 5) / gSize.x, 8.5 / gSize.y);
     gate.scale.setScalar(gScale);
     gate.position.copy(s0.pos).add(new THREE.Vector3(0, -propMinY('racing', 'overhead') * gScale, 0));
-    gate.rotation.y = s0.yaw + Math.PI / 2;
+    gate.rotation.y = s0.yaw;
     this.scene.add(gate);
     const flag = makeTextSprite('🏁 FINISH', { width: 320, height: 80, bg: 'rgba(229,37,33,0.9)', font: 'bold 44px sans-serif' });
     flag.position.copy(s0.pos).add(new THREE.Vector3(0, gSize.y * gScale + 2.5, 0));

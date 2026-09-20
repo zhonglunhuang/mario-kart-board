@@ -128,7 +128,7 @@ export function loadAssets(onProgress) {
       jobs.push(load(`${BASE}vehicles/${v.file}.glb`).then((g) => {
         const root = g.scene;
         root.traverse((o) => {
-          if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; }
+          if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; o.material.metalness = 0; o.material.roughness = 0.75; }
         });
         // 找貼圖並讀取像素
         let tex = null;
@@ -149,7 +149,7 @@ export function loadAssets(onProgress) {
     for (const ch of DEFS.CHARACTERS) {
       jobs.push(load(`${BASE}characters/character-${ch.model}.glb`).then((g) => {
         const root = g.scene;
-        root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+        root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; o.material.metalness = 0; o.material.roughness = 0.8; } });
         const size = bbox(root).getSize(new THREE.Vector3());
         assets.characters[ch.id] = { root, clips: g.animations, height: size.y };
       }));
@@ -168,7 +168,12 @@ function prep(root) {
     if (o.isMesh) {
       o.castShadow = true;
       o.receiveShadow = true;
-      if (o.material) o.material.side = THREE.FrontSide;
+      if (o.material) {
+        // glTF 沒指定 metallicFactor 時預設為 1，會讓純色模型變得很暗
+        o.material.metalness = 0;
+        o.material.roughness = 0.9;
+        o.material.side = THREE.FrontSide;
+      }
     }
   });
   root.updateMatrixWorld(true);
