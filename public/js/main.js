@@ -25,7 +25,9 @@ const state = {
   pendingOver: null,
   logLines: [],
   timerHandle: null,
-  isMobile: window.matchMedia('(max-width: 720px)').matches,
+  get isMobile() {
+    return window.matchMedia('(max-width: 720px)').matches;
+  },
 };
 
 /* ---------- 工具 ---------- */

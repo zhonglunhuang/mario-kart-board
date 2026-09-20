@@ -237,8 +237,12 @@ select option { color: #000; }
   .grid { grid-template-columns: repeat(4, 1fr); gap: 6px; }
   .pick { padding: 8px 4px; font-size: 12px; }
   .avatar { width: 40px; height: 40px; font-size: 18px; }
-  #hud-players { left: 8px; right: 8px; width: auto; max-height: 34vh; }
+  /* 手機上 #hud-top 會換行成兩列（狀態列 + 圖示列），面板要往下讓開 */
+  #hud-top { padding-bottom: 4px; }
+  .hud-actions { margin-left: 0; width: 100%; justify-content: flex-end; }
+  #hud-players { left: 8px; right: 8px; width: auto; top: calc(100px + var(--safe-top)); max-height: 32vh; }
   #hud-log { left: 8px; right: 8px; width: auto; top: auto; bottom: calc(150px + var(--safe-bottom)); max-height: 22vh; }
+  #toast { top: auto; bottom: calc(96px + var(--safe-bottom)); font-size: 15px; }
   #hud-players.collapsed, #hud-log.collapsed { display: none; }
   .chat-overlay { display: none; }
   .chat-overlay.open { display: flex; left: 8px; right: 8px; width: auto; bottom: calc(96px + var(--safe-bottom)); }

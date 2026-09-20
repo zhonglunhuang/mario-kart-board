@@ -24,9 +24,9 @@ const TILE_COLORS = {
 const TILE_W = 7.0; // 橫向寬度
 const TILE_D = 3.6; // 沿賽道長度
 
-function makeTextSprite(text, { size = 64, color = '#ffffff', bg = 'rgba(0,0,0,0.55)', font = 'bold 44px sans-serif' } = {}) {
+function makeTextSprite(text, { width = 128, size = 64, color = '#ffffff', bg = 'rgba(0,0,0,0.55)', font = 'bold 44px sans-serif' } = {}) {
   const c = document.createElement('canvas');
-  c.width = 128;
+  c.width = width;
   c.height = size;
   const ctx = c.getContext('2d');
   ctx.fillStyle = bg;
@@ -213,6 +213,7 @@ export class KartScene {
       tries++;
       const x = (Math.random() - 0.5) * 170;
       const z = -28 + (Math.random() - 0.5) * 150;
+      if (z > 8 && Math.abs(x) < 30) continue; // 起點前方留空，避免擋住預設鏡頭
       let ok = true;
       for (const s of samples) {
         if ((s.x - x) ** 2 + (s.z - z) ** 2 < 11 * 11) {
@@ -293,7 +294,7 @@ export class KartScene {
         beam.position.copy(f.pos).add(new THREE.Vector3(0, 7, 0));
         beam.lookAt(beam.position.clone().add(f.tangent));
         this.scene.add(beam);
-        const flag = makeTextSprite('🏁 START', { bg: 'rgba(229,37,33,0.9)', font: 'bold 34px sans-serif' });
+        const flag = makeTextSprite('🏁 START', { width: 256, bg: 'rgba(229,37,33,0.9)', font: 'bold 40px sans-serif' });
         flag.position.copy(f.pos).add(new THREE.Vector3(0, 8.4, 0));
         flag.scale.set(4, 2, 1);
         this.scene.add(flag);
