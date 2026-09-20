@@ -23,10 +23,10 @@ rsync -az --delete \
   "$HERE/" "$TARGET:$REMOTE_DIR/"
 
 echo "==> [2/5] 安裝相依套件 / 服務 / nginx 設定"
-ssh "$TARGET" bash -s -- "$REMOTE_DIR" "$SITE_FILE" <<'REMOTE'
+ssh "$TARGET" bash -s -- "$REMOTE_DIR" "${SITE_FILE:-auto}" <<'REMOTE'
 set -euo pipefail
 REMOTE_DIR="$1"
-SITE_FILE="$2"
+SITE_FILE="$2"; [ "$SITE_FILE" = "auto" ] && SITE_FILE=""
 
 if ! command -v node >/dev/null 2>&1; then
   echo "   安裝 Node.js 20 LTS..."
@@ -59,7 +59,9 @@ fi
 
 if [ -n "$SITE_FILE" ] && [ -f "$SITE_FILE" ]; then
   if ! grep -q "snippets/mario.conf" "$SITE_FILE"; then
-    cp "$SITE_FILE" "$SITE_FILE.bak.$(date +%s)"
+    # 備份放到 sites-enabled 之外，否則 nginx 會把備份檔也載入
+    mkdir -p /etc/nginx/backup
+    cp "$SITE_FILE" "/etc/nginx/backup/$(basename "$SITE_FILE").bak.$(date +%s)"
     # 在第一個 "server {" 之後插入 include
     awk 'BEGIN{done=0} { print } /^[[:space:]]*server[[:space:]]*\{/ && !done { print "    include snippets/mario.conf;"; done=1 }' "$SITE_FILE" > "$SITE_FILE.tmp"
     mv "$SITE_FILE.tmp" "$SITE_FILE"
