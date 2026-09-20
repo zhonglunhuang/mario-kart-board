@@ -14,6 +14,16 @@ if (!BASE.startsWith('/')) BASE = '/' + BASE;
 BASE = BASE.replace(/\/+$/, '');
 const SIO_PATH = `${BASE}/socket.io`;
 
+// 版本號：部署時寫入 VERSION 檔（git 短雜湊 + 時間）；沒有就用啟動時間
+const fs = require('fs');
+let APP_VERSION = '';
+try {
+  APP_VERSION = fs.readFileSync(path.join(__dirname, '..', 'VERSION'), 'utf8').trim();
+} catch (e) {
+  APP_VERSION = `dev-${Date.now().toString(36)}`;
+}
+const SW_SOURCE = fs.readFileSync(path.join(__dirname, '..', 'public', 'sw.js'), 'utf8');
+
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', true);
@@ -21,10 +31,28 @@ app.set('trust proxy', true);
 const router = express.Router();
 router.use('/vendor/three', express.static(path.join(__dirname, '..', 'node_modules', 'three'), { maxAge: '7d' }));
 router.use('/models', express.static(path.join(__dirname, '..', 'public', 'models'), { maxAge: '7d', immutable: false }));
-router.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '5m', etag: true }));
+router.get('/sw.js', (req, res) => {
+  res.set('Content-Type', 'application/javascript; charset=utf-8');
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.set('Service-Worker-Allowed', BASE ? BASE + '/' : '/');
+  res.send(SW_SOURCE.replace('__VERSION__', APP_VERSION));
+});
+router.use(
+  express.static(path.join(__dirname, '..', 'public'), {
+    maxAge: '5m',
+    etag: true,
+    setHeaders: (res, filePath) => {
+      // 入口頁與 manifest 不快取，才能立刻拿到新版
+      if (filePath.endsWith('.html') || filePath.endsWith('.webmanifest')) res.set('Cache-Control', 'no-cache');
+    },
+  }),
+);
 router.get('/healthz', (req, res) => res.json({ ok: true, rooms: manager.rooms.size, players: manager.players.size }));
 
-router.get('/config', (req, res) => res.json({ httpsUrl: process.env.PUBLIC_HTTPS_URL || null }));
+router.get('/config', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ httpsUrl: process.env.PUBLIC_HTTPS_URL || null, version: APP_VERSION });
+});
 
 // WebRTC ICE 設定：STUN + （若有設定）自架 TURN，TURN 憑證為 12 小時有效的暫時憑證
 router.get('/ice', (req, res) => {
@@ -110,5 +138,5 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Mario Kart Board server listening on http://0.0.0.0:${PORT}${BASE || ''}/  (socket.io path: ${SIO_PATH})`);
+  console.log(`Mario Kart Board server v${APP_VERSION} listening on http://0.0.0.0:${PORT}${BASE || ''}/  (socket.io path: ${SIO_PATH})`);
 });

@@ -16,6 +16,9 @@ SITE_FILE="${SITE_FILE:-}"   # 想 include 進哪個 nginx 站台檔；留空自
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 
+# 版本號（給 PWA service worker 判斷是否有新版）
+printf '%s-%s\n' "$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo nogit)" "$(date +%Y%m%d%H%M)" > "$HERE/VERSION"
+echo "==> 版本 $(cat "$HERE/VERSION")"
 echo "==> [1/5] 上傳程式碼到 $TARGET:$REMOTE_DIR"
 ssh "$TARGET" "mkdir -p '$REMOTE_DIR'"
 rsync -az --delete \

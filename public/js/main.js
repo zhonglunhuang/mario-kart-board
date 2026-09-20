@@ -466,6 +466,7 @@ $('#btn-rotate-skip').onclick = () => {
 };
 function leaveRaceView() {
   $('#dlg-result').classList.add('hidden');
+  window.dispatchEvent(new Event('mkb:race-over'));
   try { screen.orientation?.unlock?.(); } catch (e) { /* ignore */ }
   $('#rotate-hint').classList.add('hidden');
   audio.music('lobby');
@@ -598,6 +599,84 @@ socket.on('connect_error', () => {
   $('#conn-status').textContent = '無法連線到伺服器，重試中…';
   splash.status('無法連線到伺服器，重試中…');
 });
+
+/* ---------- PWA：service worker 與版本更新 ---------- */
+let swReg = null;
+let updateWaiting = null;
+function showUpdateBanner() {
+  const b = $('#update-banner');
+  if (!b) return;
+  b.classList.remove('hidden');
+}
+function applyUpdate() {
+  if (updateWaiting) {
+    updateWaiting.postMessage('SKIP_WAITING');
+  } else {
+    location.reload();
+  }
+}
+$('#btn-update').onclick = () => {
+  if (state.race && !confirm('比賽進行中，現在更新會離開比賽，確定嗎？')) return;
+  applyUpdate();
+};
+$('#btn-update-later').onclick = () => $('#update-banner').classList.add('hidden');
+if ('serviceWorker' in navigator) {
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) return;
+    refreshing = true;
+    location.reload();
+  });
+  navigator.serviceWorker
+    .register('sw.js', { scope: './' })
+    .then((reg) => {
+      swReg = reg;
+      if (reg.waiting && navigator.serviceWorker.controller) {
+        updateWaiting = reg.waiting;
+        showUpdateBanner();
+      }
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            updateWaiting = nw;
+            if (state.race) toast('有新版本，比賽結束後會提示更新', 3000);
+            else showUpdateBanner();
+          }
+        });
+      });
+      // 每次回到前景、每 5 分鐘、比賽結束時都檢查
+      const check = () => reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && check());
+      setInterval(check, 5 * 60 * 1000);
+      window.addEventListener('mkb:race-over', () => {
+        check();
+        if (updateWaiting) showUpdateBanner();
+      });
+    })
+    .catch((e) => console.warn('service worker 註冊失敗', e));
+}
+// 同時比對伺服器版本（沒有 SW 的瀏覽器也能提示）
+let knownVersion = null;
+async function checkServerVersion() {
+  try {
+    const c = await (await fetch(`${BASE}/config`, { cache: 'no-store' })).json();
+    if (!c.version) return;
+    const vEl = $('#app-version');
+    if (vEl) vEl.textContent = `版本 ${c.version}`;
+    if (knownVersion === null) knownVersion = c.version;
+    else if (knownVersion !== c.version) {
+      if (swReg) swReg.update().catch(() => {});
+      if (!state.race) showUpdateBanner();
+    }
+  } catch (e) {
+    /* ignore */
+  }
+}
+checkServerVersion();
+setInterval(checkServerVersion, 5 * 60 * 1000);
+document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && checkServerVersion());
 
 /* ---------- 啟動 ---------- */
 window.__debug = { state, DEFS };

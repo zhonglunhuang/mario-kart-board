@@ -60,6 +60,7 @@
       <div id="kart-grid" class="grid karts"></div>
       <button id="btn-enter" class="btn primary big">進入大廳</button>
       <p id="conn-status" class="muted small"></p>
+      <p id="app-version" class="muted small"></p>
     </div>
   </section>
 
@@ -270,6 +271,12 @@
       <div class="progress"><div id="load-bar"></div></div>
       <p class="muted small">第一次載入約 3 MB，之後會快取。</p>
     </div>
+  </div>
+
+  <div id="update-banner" class="hidden">
+    <span>🆕 有新版本可用</span>
+    <button id="btn-update" class="btn primary small">立即更新</button>
+    <button id="btn-update-later" class="btn ghost small">稍後</button>
   </div>
 
   <div id="toast"></div>
