@@ -1,4 +1,5 @@
-import { KartScene } from './scene.js';
+import { RaceScene } from './scene.js';
+import { RaceController } from './race.js';
 
 const DEFS = window.DEFS;
 const $ = (s) => document.querySelector(s);
@@ -18,15 +19,13 @@ const state = {
   entered: false,
   me: { id: null, name: '', character: 'mario', kart: 'standard' },
   room: null,
-  game: null,
   scene: null,
-  busy: false,
-  queue: [],
-  pendingOver: null,
-  logLines: [],
-  timerHandle: null,
+  race: null,
   get isMobile() {
     return window.matchMedia('(max-width: 720px)').matches;
+  },
+  get isTouch() {
+    return window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
   },
 };
 
@@ -39,11 +38,9 @@ function toast(msg, ms = 2200) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
-
 function showScreen(id) {
   for (const s of document.querySelectorAll('.screen')) s.classList.toggle('hidden', s.id !== id);
 }
-
 function charOf(id) {
   return DEFS.CHARACTERS.find((c) => c.id === id) || DEFS.CHARACTERS[0];
 }
@@ -60,8 +57,14 @@ function emit(event, payload) {
     else socket.emit(event, payload, resolve);
   });
 }
+function fmtTime(ms) {
+  if (ms == null) return '--';
+  const s = ms / 1000;
+  const m = Math.floor(s / 60);
+  return `${m}:${(s - m * 60).toFixed(1).padStart(4, '0')}`;
+}
 
-/* ---------- 玩家設定畫面 ---------- */
+/* ---------- 玩家設定 ---------- */
 function loadProfile() {
   try {
     const saved = JSON.parse(localStorage.getItem('mkb-profile') || '{}');
@@ -80,6 +83,11 @@ function saveProfile() {
   }
 }
 
+function statBar(v, max) {
+  const pct = Math.round((v / max) * 100);
+  return `<span class="bar"><i style="width:${pct}%"></i></span>`;
+}
+
 function renderPickers() {
   const cg = $('#char-grid');
   cg.innerHTML = '';
@@ -96,7 +104,9 @@ function renderPickers() {
   kg.innerHTML = '';
   for (const k of DEFS.KARTS) {
     const d = el('div', 'pick' + (k.id === state.me.kart ? ' selected' : ''));
-    d.innerHTML = `<div class="kart-emoji">${k.emoji}</div><div>${esc(k.name)}</div><div class="desc">${esc(k.desc)}</div>`;
+    d.innerHTML = `<div class="kart-emoji">${k.emoji}</div><div>${esc(k.name)}</div>
+      <div class="stats"><div>極速 ${statBar(k.maxSpeed, 50)}</div><div>加速 ${statBar(k.accel, 27)}</div><div>轉向 ${statBar(k.turn, 2.8)}</div><div>越野 ${statBar(k.offroad, 1)}</div></div>
+      <div class="desc">${esc(k.desc)}</div>`;
     d.onclick = () => {
       state.me.kart = k.id;
       renderPickers();
@@ -118,7 +128,6 @@ $('#btn-enter').onclick = async () => {
   showScreen('screen-lobby');
   socket.emit('rooms:list', renderRooms);
 };
-
 $('#btn-edit-profile').onclick = () => {
   $('#in-name').value = state.me.name;
   renderPickers();
@@ -131,7 +140,6 @@ function renderLobbyMe() {
   const k = kartOf(state.me.kart);
   $('#lobby-me').innerHTML = `${avatarHtml(c.id, true)}<div>${esc(state.me.name)}<div class="small muted">${esc(c.name)} · ${k.emoji} ${esc(k.name)}</div></div>`;
 }
-
 function renderRooms(rooms) {
   const list = $('#room-list');
   list.innerHTML = '';
@@ -148,7 +156,7 @@ function renderRooms(rooms) {
         <div class="name">${esc(r.name)}</div>
         <div class="sub">房主 ${esc(r.hostName)} · ${r.laps} 圈 · ${r.count}/${r.maxPlayers} 人</div>
       </div>
-      <span class="badge ${playing ? 'playing' : full ? 'warn' : 'ok'}">${playing ? '遊戲中' : full ? '已滿' : '等待中'}</span>`;
+      <span class="badge ${playing ? 'playing' : full ? 'warn' : 'ok'}">${playing ? '比賽中' : full ? '已滿' : '等待中'}</span>`;
     const btn = el('button', 'btn small', '加入');
     btn.disabled = full || playing;
     btn.onclick = async () => {
@@ -162,7 +170,6 @@ function renderRooms(rooms) {
 }
 socket.on('rooms', renderRooms);
 $('#btn-refresh').onclick = () => socket.emit('rooms:list', renderRooms);
-
 $('#btn-open-create').onclick = () => {
   $('#in-room-name').value = `${state.me.name} 的房間`;
   $('#dlg-create').classList.remove('hidden');
@@ -178,11 +185,11 @@ $('#btn-create').onclick = async () => {
 /* ---------- 房間 ---------- */
 function enterRoom(room) {
   state.room = room;
+  ensureScene().catch((e) => console.error('模型載入失敗', e));
   $('#room-chat-log').innerHTML = '';
   renderRoom();
   showScreen('screen-room');
 }
-
 function renderRoom() {
   const r = state.room;
   if (!r) return;
@@ -216,21 +223,19 @@ function renderRoom() {
   $('#room-hint').textContent = isHost
     ? allReady
       ? r.players.length === 1
-        ? '可以單人試玩，或等朋友加入後再開始。'
+        ? '可以單人練習，或等朋友加入後再開始。'
         : '全員準備完成，可以開始！'
       : '等待所有玩家按下準備…'
     : me?.ready
-      ? '等待房主開始遊戲…'
+      ? '等待房主開始比賽…'
       : '按「準備」告訴房主你準備好了。';
 }
-
 socket.on('room:state', (room) => {
   const wasIn = !!state.room;
   state.room = room;
   renderRoom();
   if (!wasIn) showScreen('screen-room');
 });
-
 $('#btn-ready').onclick = () => {
   const me = state.room?.players.find((p) => p.id === state.me.id);
   socket.emit('room:ready', !me?.ready);
@@ -268,311 +273,86 @@ socket.on('chat', (m) => {
     while (log.children.length > 60) log.removeChild(log.firstChild);
     log.scrollTop = log.scrollHeight;
   }
-  if (state.game && state.isMobile) toast(`${m.from}：${m.text}`, 2500);
+  if (state.race) toast(`${m.from}：${m.text}`, 2500);
 });
 
-/* ---------- 遊戲 ---------- */
+/* ---------- 比賽 ---------- */
+let scenePromise = null;
 function ensureScene() {
-  if (!state.scene) state.scene = new KartScene($('#gl'));
-  return state.scene;
-}
-
-function addLog(lines, fresh) {
-  if (!lines || !lines.length) return;
-  const log = $('#hud-log');
-  for (const l of lines) {
-    state.logLines.push(l);
-    const d = el('div', 'line' + (fresh ? ' new' : ''), esc(l));
-    log.appendChild(d);
+  if (!scenePromise) {
+    scenePromise = RaceScene.create($('#gl'), {
+      mobile: state.isMobile,
+      onProgress: (p) => {
+        $('#load-bar').style.width = `${Math.round(p * 100)}%`;
+      },
+    }).then((scene) => {
+      state.scene = scene;
+      return scene;
+    });
   }
-  while (log.children.length > 80) log.removeChild(log.firstChild);
-  log.scrollTop = log.scrollHeight;
-  setTimeout(() => log.querySelectorAll('.line.new').forEach((n) => n.classList.remove('new')), 2500);
+  return scenePromise;
 }
 
-function renderHelp() {
-  $('#help-tiles').innerHTML = Object.entries(DEFS.TILE_INFO)
-    .map(([, t]) => `<div class="legend"><div class="e">${t.emoji}</div><div><b>${esc(t.name)}</b>${esc(t.desc)}</div></div>`)
-    .join('');
-  $('#help-items').innerHTML = Object.values(DEFS.ITEMS)
-    .map((t) => `<div class="legend"><div class="e">${t.emoji}</div><div><b>${esc(t.name)}</b>${esc(t.desc)}</div></div>`)
-    .join('');
-  $('#help-karts').innerHTML = DEFS.KARTS.map((k) => `<div class="legend"><div class="e">${k.emoji}</div><div><b>${esc(k.name)}</b>${esc(k.desc)}</div></div>`).join('');
-}
-
-function startGame(payload) {
+async function startGame(payload) {
   state.room = payload.room;
-  state.game = payload.state;
-  state.queue = [];
-  state.busy = false;
-  state.pendingOver = null;
-  state.logLines = [];
-  $('#hud-log').innerHTML = '';
-  $('#game-chat-log').innerHTML = '';
   $('#dlg-result').classList.add('hidden');
-  const scene = ensureScene();
-  scene.setPlayers(state.game.players);
-  scene.setBananas(state.game.bananas);
-  scene.setCurrent(state.game.currentId);
-  scene.setFollow(true);
-  scene.focus(state.game.currentId);
+  $('#game-chat-log').innerHTML = '';
+  $('#hud-help').classList.add('hidden');
+  $('#chat-overlay').classList.toggle('open', !state.isMobile);
+  if (!state.scene) $('#dlg-loading').classList.remove('hidden');
+  const scene = await ensureScene();
+  $('#dlg-loading').classList.add('hidden');
+  if (state.race) state.race.destroy();
   showScreen('screen-game');
   scene.resize();
-  if (state.isMobile) {
-    $('#hud-players').classList.add('collapsed');
-    $('#hud-log').classList.remove('collapsed');
-  } else {
-    $('#hud-players').classList.remove('collapsed');
-    $('#hud-log').classList.remove('collapsed');
-  }
-  addLog([`🚦 比賽開始！共 ${state.game.laps} 圈，${state.game.players.length} 位玩家`], true);
-  renderHUD();
-  startTimer();
-}
-
-function renderHUD() {
-  const g = state.game;
-  if (!g) return;
-  const cur = g.players.find((p) => p.id === g.currentId);
-  const mine = g.currentId === state.me.id;
-  const info = $('#turn-info');
-  if (g.finished) info.textContent = '比賽結束';
-  else if (state.busy) info.textContent = '⏳ 移動中…';
-  else if (mine) info.textContent = '🎯 你的回合！';
-  else info.textContent = `輪到 ${cur?.name ?? '?'}`;
-  info.classList.toggle('mine', mine && !state.busy && !g.finished);
-
-  // 玩家面板
-  const panel = $('#hud-players');
-  panel.innerHTML = '';
-  const sorted = [...g.players].sort((a, b) => a.standing - b.standing);
-  for (const p of sorted) {
-    const row = el('div', 'hp-row' + (p.id === g.currentId ? ' current' : '') + (p.id === state.me.id ? ' me' : '') + (p.finished ? ' done' : '') + (p.dropped ? ' dropped' : ''));
-    const status = [];
-    if (p.finished) status.push(`🏁 第 ${p.rank} 名`);
-    else status.push(`第 ${p.lap + 1} 圈 · 第 ${p.tile} 格`);
-    if (p.starTurns > 0) status.push('⭐ 無敵');
-    if (p.skipTurn) status.push('💫 暫停');
-    row.innerHTML = `<div class="rank">${p.standing}</div>${avatarHtml(p.character, true)}
-      <div class="info"><div class="name">${esc(p.name)}</div><div class="sub">${status.join(' · ')}</div></div>
-      <div class="its">${p.items.map((i) => DEFS.ITEMS[i].emoji).join('')}</div>`;
-    panel.appendChild(row);
-  }
-
-  // 我的道具
-  const me = g.players.find((p) => p.id === state.me.id);
-  const items = $('#my-items');
-  items.innerHTML = '';
-  const canAct = mine && !state.busy && !g.finished && me && !me.finished;
-  for (let i = 0; i < DEFS.MAX_ITEMS; i++) {
-    const it = me?.items[i];
-    const slot = el('div', 'item-slot' + (it ? (canAct && !g.usedItemThisTurn ? ' usable' : '') : ' empty'));
-    slot.textContent = it ? DEFS.ITEMS[it].emoji : '·';
-    slot.title = it ? `${DEFS.ITEMS[it].name}：${DEFS.ITEMS[it].desc}` : '空的道具欄';
-    if (it) {
-      slot.onclick = async () => {
-        if (!canAct) return toast('現在不能使用道具');
-        if (g.usedItemThisTurn) return toast('這回合已經用過道具了');
-        if (!confirm(`使用 ${DEFS.ITEMS[it].emoji} ${DEFS.ITEMS[it].name}？\n${DEFS.ITEMS[it].desc}`)) return;
-        const res = await emit('game:useItem', { slot: i });
-        if (res?.error) toast(res.error);
-      };
-    }
-    items.appendChild(slot);
-  }
-  $('#btn-roll').disabled = !canAct;
-}
-
-function startTimer() {
-  clearInterval(state.timerHandle);
-  state.timerHandle = setInterval(() => {
-    const g = state.game;
-    const t = $('#turn-timer');
-    if (!g || g.finished) {
-      t.textContent = '';
-      return;
-    }
-    const left = Math.max(0, Math.ceil((g.turnDeadline - Date.now()) / 1000));
-    t.textContent = `⏱ ${left}s`;
-    t.classList.toggle('urgent', left <= 10);
-  }, 500);
-}
-
-async function rollDice(die, bonus) {
-  const d = $('#dice');
-  d.classList.add('rolling');
-  d.classList.remove('bonus');
-  const start = performance.now();
-  await new Promise((resolve) => {
-    const tick = () => {
-      d.textContent = String(1 + Math.floor(Math.random() * 6));
-      if (performance.now() - start < 800) setTimeout(tick, 70);
-      else resolve();
-    };
-    tick();
-  });
-  d.classList.remove('rolling');
-  d.textContent = String(die);
-  if (bonus) {
-    await new Promise((r) => setTimeout(r, 350));
-    d.textContent = `${die}+${bonus}`;
-    d.classList.add('bonus');
-  }
-  await new Promise((r) => setTimeout(r, 400));
-}
-
-const MOVE_LABEL = {
-  roll: '前進',
-  boost: '🔥 加速',
-  mushroom: '🍄 衝刺',
-  bump: '💥 被撞退',
-  banana: '🍌 滑倒',
-  green: '🐢 被綠殼擊中',
-  red: '🔴 被紅殼擊中',
-  blue: '🔵 被藍殼擊中',
-  lightning: '⚡ 被閃電擊中',
-};
-
-async function handleAction(ev) {
-  const scene = ensureScene();
-  state.busy = true;
-  renderHUD();
-  const actor = state.game?.players.find((p) => p.id === ev.playerId);
-  scene.focus(ev.playerId);
-  if (ev.kind === 'roll') {
-    addLog([ev.log[0]], true);
-    await rollDice(ev.die, ev.bonus);
-  } else if (ev.kind === 'item') {
-    addLog([ev.log[0]], true);
-    toast(`${actor?.name ?? ''} 使用了 ${DEFS.ITEMS[ev.item]?.emoji ?? ''} ${DEFS.ITEMS[ev.item]?.name ?? ''}`);
-    await new Promise((r) => setTimeout(r, 500));
-    if (ev.bananaPlaced !== undefined) scene.setBananas(ev.state.bananas);
-  } else if (ev.kind === 'leave') {
-    addLog([ev.log[0]], true);
-  }
-  for (const m of ev.moves) {
-    scene.focus(m.playerId);
-    const who = state.game?.players.find((p) => p.id === m.playerId);
-    const label = MOVE_LABEL[m.kind] || m.kind;
-    if (m.kind !== 'roll') addLog([`${who?.name ?? ''} ${label}（${m.from} → ${m.to}）`]);
-    await scene.animateMove(m.playerId, m.from, m.to, m.kind);
-  }
-  addLog(ev.log.slice(1));
-  if (ev.gains?.length) {
-    for (const gi of ev.gains) if (gi.playerId === state.me.id) toast(`你獲得 ${DEFS.ITEMS[gi.item].emoji} ${DEFS.ITEMS[gi.item].name}`);
-  }
-  state.game = ev.state;
-  scene.setBananas(ev.state.bananas);
-  for (const p of ev.state.players) if (p.dropped) scene.removeKart(p.id);
-  scene.setCurrent(ev.state.currentId);
-  if (ev.state.currentId) scene.focus(ev.state.currentId);
-  if (ev.state.currentId === state.me.id && !ev.state.finished) {
-    toast('🎯 輪到你了！', 1500);
-    if (navigator.vibrate) navigator.vibrate(80);
-  }
-  state.busy = false;
-  renderHUD();
-}
-
-async function pump() {
-  if (state.busy) return;
-  while (state.queue.length) {
-    const ev = state.queue.shift();
-    try {
-      await handleAction(ev);
-    } catch (e) {
-      console.error(e);
-      state.busy = false;
-    }
-  }
-  if (state.pendingOver) {
-    const over = state.pendingOver;
-    state.pendingOver = null;
-    showResult(over);
+  state.race = new RaceController({ scene, socket, meId: state.me.id, state: payload.state, room: payload.room, isTouch: state.isTouch });
+  if (document.documentElement.requestFullscreen && state.isTouch) {
+    document.documentElement.requestFullscreen().catch(() => {});
   }
 }
-
 socket.on('game:start', startGame);
-socket.on('game:action', (ev) => {
-  if (!state.game) return;
-  state.queue.push(ev);
-  pump();
-});
+socket.on('race:snapshot', (snap) => state.race?.onSnapshot(snap));
+socket.on('race:event', (ev) => state.race?.onEvent(ev));
 socket.on('game:over', (payload) => {
-  state.pendingOver = payload;
-  pump();
+  showResult(payload);
 });
 
 function showResult(payload) {
   const list = $('#result-list');
   list.innerHTML = '';
   const medals = ['🥇', '🥈', '🥉'];
-  const players = [...payload.result.players].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
+  const players = [...payload.result.players].filter((p) => !p.dropped || p.rank).sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
   players.forEach((p, i) => {
     const row = el('div', 'result-row');
-    row.innerHTML = `<div class="medal">${p.dropped && !p.rank ? '🚪' : medals[i] || `${p.rank}.`}</div>${avatarHtml(p.character, true)}
+    row.innerHTML = `<div class="medal">${medals[i] || `${p.rank ?? '-'}.`}</div>${avatarHtml(p.character, true)}
       <div class="name">${esc(p.name)}${p.id === state.me.id ? ' (你)' : ''}</div>
-      <div class="muted small">${p.dropped ? '離開' : `${p.rank} 名`}</div>`;
+      <div class="muted small">${p.finishTime != null ? fmtTime(p.finishTime) : '未完賽'}</div>`;
     list.appendChild(row);
   });
   state.room = payload.room;
   $('#dlg-result').classList.remove('hidden');
 }
-$('#btn-result-close').onclick = () => {
+function leaveRaceView() {
   $('#dlg-result').classList.add('hidden');
-  state.game = null;
-  clearInterval(state.timerHandle);
-  state.scene?.setCurrent(null);
+  if (state.race) {
+    state.race.destroy();
+    state.race = null;
+  }
+  if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+}
+$('#btn-result-close').onclick = () => {
+  leaveRaceView();
   renderRoom();
   showScreen('screen-room');
 };
-
-$('#btn-roll').onclick = async () => {
-  $('#btn-roll').disabled = true;
-  const res = await emit('game:roll');
-  if (res?.error) {
-    toast(res.error);
-    renderHUD();
-  }
-};
-$('#btn-toggle-players').onclick = () => {
-  $('#hud-players').classList.toggle('collapsed');
-  if (state.isMobile && !$('#hud-players').classList.contains('collapsed')) $('#hud-log').classList.add('collapsed');
-};
-$('#btn-toggle-log').onclick = () => {
-  const log = $('#hud-log');
-  log.classList.toggle('collapsed');
-  if (state.isMobile) {
-    if (!log.classList.contains('collapsed')) $('#hud-players').classList.add('collapsed');
-    $('#chat-overlay').classList.toggle('open', !log.classList.contains('collapsed'));
-  }
-};
-let camMode = 0;
-$('#btn-camera').onclick = () => {
-  const scene = ensureScene();
-  camMode = (camMode + 1) % 3;
-  if (camMode === 0) {
-    scene.setFollow(true);
-    scene.focus(state.game?.currentId);
-    toast('🎥 跟隨目前玩家');
-  } else if (camMode === 1) {
-    scene.setFollow(true);
-    scene.focus(state.me.id);
-    toast('🎥 跟隨自己');
-  } else {
-    scene.overview();
-    toast('🎥 全景（可拖曳旋轉）');
-  }
-};
 $('#btn-help').onclick = () => $('#hud-help').classList.toggle('hidden');
 $('#btn-help-close').onclick = () => $('#hud-help').classList.add('hidden');
+$('#btn-chat').onclick = () => $('#chat-overlay').classList.toggle('open');
 $('#btn-quit').onclick = async () => {
-  if (!confirm('確定要離開比賽嗎？你會被判定退出。')) return;
+  if (!confirm('確定要退出比賽嗎？')) return;
   await emit('room:leave');
-  state.game = null;
+  leaveRaceView();
   state.room = null;
-  clearInterval(state.timerHandle);
-  state.scene?.setCurrent(null);
   showScreen('screen-lobby');
   socket.emit('rooms:list', renderRooms);
 };
@@ -581,14 +361,11 @@ $('#btn-quit').onclick = async () => {
 socket.on('connect', () => {
   $('#conn-status').textContent = '已連線到伺服器';
   if (state.entered) {
-    // 伺服器重啟或斷線重連：重新註冊並回到大廳
     socket.emit('join', { name: state.me.name, character: state.me.character, kart: state.me.kart }, (res) => {
       if (res?.playerId) state.me.id = res.playerId;
-      if (state.room || state.game) {
+      if (state.room || state.race) {
+        leaveRaceView();
         state.room = null;
-        state.game = null;
-        clearInterval(state.timerHandle);
-        state.scene?.setCurrent(null);
         showScreen('screen-lobby');
         toast('連線曾中斷，已回到大廳，請重新加入房間', 3500);
       }
@@ -608,9 +385,8 @@ socket.on('connect_error', () => {
 loadProfile();
 $('#in-name').value = state.me.name;
 renderPickers();
-renderHelp();
 window.addEventListener('beforeunload', (e) => {
-  if (state.game) {
+  if (state.race) {
     e.preventDefault();
     e.returnValue = '';
   }

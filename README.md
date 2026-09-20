@@ -1,28 +1,29 @@
-# 🏁 賽車桌遊 Online
+# 🏁 賽車 Online
 
-多人連線的 3D 賽車桌遊。開房間、看房間列表、選角色與車種，用手機或電腦打開瀏覽器就能直接玩。
+多人連線的 3D 即時競速賽車。開房間、看房間列表、選角色與車種，用手機或電腦打開瀏覽器就能直接玩。
 
-- **後端**：Node.js + Express + Socket.IO（伺服器權威的回合制規則）
-- **前端**：Three.js（程序化生成的低多邊形賽道、角色、車輛，不含任何版權素材）、原生 JS、手機優先版面、PWA 可加到主畫面
+- **後端**：Node.js + Express + Socket.IO（房間管理、倒數、圈數/檢查點、排名、道具與命中裁判、每秒 20 次狀態同步）
+- **前端**：Three.js、原生 JS；街機風車輛物理在客戶端執行；手機優先版面（觸控轉向、自動油門）；PWA 可加到主畫面
+- **3D 模型**：[Kenney](https://kenney.nl) 的 Car Kit、Mini Characters、Nature Kit、Racing Kit（CC0 授權，可商用）；車身依角色顏色做色相變換
 - **部署**：Hostinger VPS（Ubuntu）掛在 `http://主機/mario/` 子路徑，systemd + Nginx 反向代理；也提供 Docker / PM2 設定
 
 ## 玩法
 
-1. 輸入暱稱、選角色（瑪利歐、路易吉、碧姬、耀西、奇諾比奧、庫巴、森喜剛、瓦利歐）與車種。
-2. 在大廳開房間（設定圈數、人數上限）或加入別人的房間；全員按「準備」後房主開始。
-3. 輪到你時可以先用一個道具，再擲骰子前進；先跑完指定圈數的人獲勝。逾時（預設 45 秒）自動擲骰。
+1. 輸入暱稱、選角色（8 位）與車種（卡丁車、F1 賽車、越野 SUV、未來賽車、拖拉機，各有極速 / 加速 / 轉向 / 越野數值）。
+2. 在大廳開房間（圈數、人數上限）或加入別人的房間；全員按「準備」後房主開始。
+3. 倒數 3 秒後起跑。撞到護欄會減速、開上草地會變慢、撞到別人會互相推擠。
+4. 撿賽道上的道具箱拿道具，落後者會拿到更強的道具；先跑完指定圈數者獲勝，第一名完賽後其他人有 40 秒完成。
 
-| 格子 | 效果 |
+| 道具 | 效果 |
 | --- | --- |
-| 🎁 道具箱 | 獲得隨機道具，落後者拿到更強的道具 |
-| 🔥 加速板 | 再前進 2 格 |
-| 🛢️ 油漬 | 下一回合暫停（越野車免疫） |
-| 🌟 星星格 | 再擲一次骰子 |
-| 停在別人的格子 | 對方被撞退 1 格（大腳車 2 格） |
+| 🍄 蘑菇 | 加速衝刺 1.5 秒 |
+| 🍌 香蕉 | 丟在身後，踩到的人打滑 |
+| 🐢 綠龜殼 | 直線射出並會在護欄反彈，打中的人打滑 |
+| 🔴 紅龜殼 | 自動追蹤前方最近的對手 |
+| ⚡ 閃電 | 所有對手打滑並減速 3 秒 |
+| ⭐ 無敵星星 | 6 秒無敵並加速 |
 
-道具：🍄 蘑菇（+3）、🍌 香蕉（放置陷阱）、🐢 綠龜殼（隨機對手 −3）、🔴 紅龜殼（前方最近對手 −4）、🔵 藍龜殼（領先者 −5）、⚡ 閃電（全部對手 −2）、⭐ 無敵星星（兩回合免疫、擲骰 +2）。
-
-車種能力：跑車（擲 6 額外 +1）、越野車（免疫油漬與香蕉）、摩托車（拿道具 50% 多一個）、大腳車（撞人退 2 格）、標準賽車（無）。
+操作：電腦用 ← → 轉向、↑ 油門、↓ 煞車 / 倒車、空白鍵使用道具；手機用左下 ◀ ▶ 轉向、右下道具 / 煞車，預設自動油門（可關）。
 
 ## 本機執行
 
@@ -38,9 +39,8 @@ npm start
 | --- | --- | --- |
 | `PORT` | `3000` | 監聽 port |
 | `BASE_PATH` | `/mario` | 掛載的子路徑；要放在根路徑就設 `/` |
-| `TURN_SECONDS` | `45` | 每回合秒數，逾時自動擲骰 |
 
-測試（啟動伺服器、兩個客戶端打完一整場）：
+測試（啟動伺服器、兩個客戶端模擬跑完一整場）：
 
 ```bash
 npm test
@@ -48,65 +48,56 @@ npm test
 
 ## 部署到 Hostinger VPS
 
-前提：本機能以 SSH 金鑰登入 VPS（`ssh root@你的IP`）。
+前提：本機能以 SSH 金鑰登入 VPS。
 
 ```bash
 ./deploy/deploy.sh root@187.127.206.177
 ```
 
-腳本會：
-
-1. `rsync` 專案到 `/srv/mario-kart-board`
-2. 主機上 `npm ci --omit=dev`（沒有 Node 會自動安裝 Node 20）
-3. 安裝並啟動 systemd 服務 `mario-kart`（port 3100，`BASE_PATH=/mario`）
-4. 把 `deploy/nginx-mario.conf` 裝到 `/etc/nginx/snippets/mario.conf`，並 `include` 進既有站台的 `server {}`（會先備份原檔）；沒有既有站台時建立獨立站台
-5. `nginx -t` 後 reload，檢查 `/mario/healthz`
-
-完成後用 `http://你的IP/mario/` 開啟。之後更新程式只要再跑一次同樣的指令。
+腳本會 `rsync` 專案到 `/srv/mario-kart-board`、`npm ci --omit=dev`、安裝並啟動 systemd 服務 `mario-kart`（port 3100，`BASE_PATH=/mario`）、把 `deploy/nginx-mario.conf` 裝成 Nginx snippet 並 include 進既有站台（會先備份到 `/etc/nginx/backup/`），最後 reload Nginx 並檢查 `/mario/healthz`。之後更新程式只要再跑一次同樣的指令。
 
 常用指令（在 VPS 上）：
 
 ```bash
-systemctl status mario-kart        # 服務狀態
-journalctl -u mario-kart -f        # 即時 log
-systemctl restart mario-kart       # 重啟
+systemctl status mario-kart
+journalctl -u mario-kart -f
+systemctl restart mario-kart
 ```
 
 ### HTTPS
 
-有網域後，在 VPS 上執行 `certbot --nginx -d 你的網域`，certbot 會自動改寫 Nginx 設定；Socket.IO 會自動走 `wss://`。
+有網域後，先移除臨時的 443 站台（`rm /etc/nginx/sites-enabled/plain-443`），再執行 `certbot --nginx -d 你的網域`；Socket.IO 會自動走 `wss://`。
 
-### Docker 替代方案
-
-```bash
-docker compose up -d --build     # 服務在 127.0.0.1:3100
-```
-
-再把 `deploy/nginx-mario.conf` include 進 Nginx 即可。
-
-### PM2 替代方案
+### Docker / PM2 替代方案
 
 ```bash
-npm i -g pm2
-pm2 start ecosystem.config.js && pm2 save && pm2 startup
+docker compose up -d --build            # 服務在 127.0.0.1:3100
+npm i -g pm2 && pm2 start ecosystem.config.js && pm2 save
 ```
 
 ## 專案結構
 
 ```
-server/index.js      HTTP + Socket.IO 進入點（base path、靜態檔、事件路由）
-server/rooms.js      玩家 / 房間管理（建立、加入、準備、開始、離開）
-server/game.js       遊戲規則引擎（擲骰、移動、格子效果、道具、名次、回合計時）
-public/shared/defs.js 角色、車種、道具、賽道定義（前後端共用）
-public/js/main.js    UI 流程、Socket 事件、動畫佇列、HUD
-public/js/scene.js   Three.js 場景：賽道、鏡頭跟隨、移動動畫
-public/js/characters.js 程序化角色 / 車輛 / 道具模型
-deploy/              nginx、systemd、部署腳本
-test/e2e.test.js     端對端測試
+server/index.js        HTTP + Socket.IO 進入點（base path、靜態檔、事件路由）
+server/rooms.js        玩家 / 房間管理（建立、加入、準備、開始、離開）
+server/game.js         競速裁判：倒數、圈數/檢查點、排名、道具箱、道具效果、命中、完賽
+public/shared/defs.js  賽道控制點、角色、車種數值、道具、時間常數（前後端共用）
+public/js/main.js      大廳 / 房間 UI、Socket 事件、載入流程
+public/js/race.js      本地車輛物理、輸入（鍵盤 / 觸控）、龜殼模擬、狀態回報、HUD、小地圖
+public/js/scene.js     Three.js 場景：賽道路面、護欄、看台、樹木（InstancedMesh）、鏡頭
+public/js/models.js    glTF 模型載入、車輛色相變換、角色駕駛動畫、道具模型
+public/models/         Kenney CC0 模型（見 LICENSE.txt）
+deploy/                nginx、systemd、部署腳本
+test/e2e.test.js       端對端測試
 ```
+
+## 同步方式
+
+- 每位玩家的車由自己的瀏覽器模擬，每 50ms 回報位置、速度與賽道進度 `t`；伺服器以 `t` 判定檢查點與圈數並廣播全員快照，其他玩家的車以速度外推 + 平滑插值顯示。
+- 道具箱、道具效果、命中判定由伺服器決定（龜殼的飛行由發射者的客戶端模擬並回報命中）。
 
 ## 注意事項
 
-- 遊戲狀態存在記憶體中，重啟伺服器會清空房間；請保持單一 Node 實例（不要開多個 worker）。
-- 玩家斷線會被判定退出比賽（目前不支援斷線重連接回原局）。
-- 角色名稱僅為致敬，所有 3D 模型皆為程式生成的原創幾何體。若要公開商用，建議改用自己的角色名稱。
+- 房間狀態在記憶體中，重啟伺服器會清空；請保持單一 Node 實例。
+- 玩家斷線會被判定退出比賽，目前不支援斷線後接回原局。
+- 角色名稱僅為致敬；模型皆為 Kenney CC0 素材。若要公開商用，建議改用自己的角色名稱。

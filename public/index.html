@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-  <title>賽車桌遊 Online</title>
-  <meta name="description" content="多人連線 3D 賽車桌遊：開房間、選角色、選車種、擲骰子競速。" />
+  <title>賽車 Online</title>
+  <meta name="description" content="多人連線 3D 賽車：開房間、選角色、選車種，手機電腦都能直接玩。" />
   <meta name="theme-color" content="#1a1a2e" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -23,8 +23,8 @@
   <!-- 玩家設定 -->
   <section id="screen-profile" class="screen">
     <div class="card">
-      <h1>🏁 賽車桌遊 Online</h1>
-      <p class="muted">擲骰子、搶道具、撞開對手，第一個跑完圈數的人獲勝！</p>
+      <h1>🏁 賽車 Online</h1>
+      <p class="muted">多人即時競速：油門、轉向、撿道具箱、丟龜殼，先跑完圈數的人獲勝！</p>
       <label class="field">暱稱
         <input id="in-name" maxlength="12" placeholder="輸入你的名字" autocomplete="nickname" />
       </label>
@@ -61,15 +61,15 @@
       <label class="field">房間名稱 <input id="in-room-name" maxlength="20" placeholder="例如：晚上來一場" /></label>
       <label class="field">圈數
         <select id="in-room-laps">
-          <option value="1">1 圈（約 5 分鐘）</option>
-          <option value="2" selected>2 圈（約 10 分鐘）</option>
-          <option value="3">3 圈</option>
+          <option value="1">1 圈（快速）</option>
+          <option value="2">2 圈</option>
+          <option value="3" selected>3 圈</option>
+          <option value="5">5 圈</option>
         </select>
       </label>
       <label class="field">人數上限
         <select id="in-room-max">
           <option value="2">2 人</option>
-          <option value="3">3 人</option>
           <option value="4" selected>4 人</option>
           <option value="6">6 人</option>
           <option value="8">8 人</option>
@@ -92,15 +92,15 @@
       <div id="room-players" class="list"></div>
       <div id="room-host-settings" class="row hidden">
         <label class="field inline">圈數
-          <select id="in-set-laps"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+          <select id="in-set-laps"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select>
         </label>
         <label class="field inline">上限
-          <select id="in-set-max"><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8</option></select>
+          <select id="in-set-max"><option value="2">2</option><option value="4">4</option><option value="6">6</option><option value="8">8</option></select>
         </label>
       </div>
       <div class="row">
         <button id="btn-ready" class="btn primary big">✅ 準備</button>
-        <button id="btn-start" class="btn primary big hidden">🚦 開始遊戲</button>
+        <button id="btn-start" class="btn primary big hidden">🚦 開始比賽</button>
       </div>
       <p id="room-hint" class="muted small"></p>
       <div class="chat">
@@ -113,38 +113,55 @@
     </div>
   </section>
 
-  <!-- 遊戲 HUD -->
+  <!-- 比賽 HUD -->
   <section id="screen-game" class="screen hud hidden">
     <div id="hud-top">
-      <div id="turn-info" class="pill"></div>
-      <div id="turn-timer" class="pill timer"></div>
+      <div id="hud-pos" class="pill big">第 1 名</div>
+      <div id="hud-lap" class="pill">第 1 / 3 圈</div>
+      <div id="hud-fx" class="pill fx"></div>
       <div class="hud-actions">
-        <button id="btn-toggle-players" class="btn icon" title="玩家">📋</button>
-        <button id="btn-toggle-log" class="btn icon" title="紀錄">📜</button>
-        <button id="btn-camera" class="btn icon" title="切換視角">🎥</button>
+        <button id="btn-standings" class="btn icon" title="排名">📋</button>
+        <button id="btn-chat" class="btn icon" title="聊天">💬</button>
         <button id="btn-help" class="btn icon" title="說明">❓</button>
-        <button id="btn-quit" class="btn icon" title="離開">🚪</button>
+        <button id="btn-quit" class="btn icon" title="退出">🚪</button>
       </div>
     </div>
 
-    <div id="hud-players" class="panel"></div>
-    <div id="hud-log" class="panel log"></div>
+    <div id="hud-standings" class="panel"></div>
+    <div id="hud-center"></div>
+    <div id="hud-msg"></div>
 
     <div id="hud-help" class="panel help hidden">
-      <h3>格子效果</h3>
-      <div id="help-tiles"></div>
+      <h3>操作</h3>
+      <p class="small">電腦：← → 轉向、↑ 油門、↓ 煞車 / 倒車、空白鍵使用道具。<br />手機：左下 ◀ ▶ 轉向，右下使用道具與煞車；預設自動油門。</p>
       <h3>道具</h3>
       <div id="help-items"></div>
-      <h3>車種能力</h3>
+      <h3>車種</h3>
       <div id="help-karts"></div>
-      <p class="muted small">規則：輪到你時可先用一個道具，再擲骰子前進。停在別人的格子會把對方撞退。先跑完指定圈數者獲勝。逾時會自動擲骰。</p>
+      <p class="muted small">出界（草地）會減速；撞到護欄會損失速度；撿道具箱可獲得一個道具（落後者拿到更強的道具）。先跑完指定圈數的人獲勝。</p>
       <button id="btn-help-close" class="btn ghost">關閉</button>
     </div>
 
-    <div id="hud-bottom">
-      <div id="my-items" class="items"></div>
-      <div id="dice" class="dice">?</div>
-      <button id="btn-roll" class="btn primary roll" disabled>🎲 擲骰子</button>
+    <div id="hud-left">
+      <canvas id="minimap" width="170" height="170"></canvas>
+      <div id="hud-speed" class="pill">0 km/h</div>
+    </div>
+    <div id="hud-right">
+      <div id="hud-item" class="item-slot" title="使用道具">·</div>
+    </div>
+    <div id="hud-keys" class="muted small">← → 轉向 · ↑ 油門 · ↓ 煞車 · 空白鍵 道具</div>
+
+    <div id="touch-controls" class="hidden">
+      <div class="tc-group left">
+        <button id="tc-left" class="tc">◀</button>
+        <button id="tc-right" class="tc">▶</button>
+      </div>
+      <div class="tc-group right">
+        <button id="tc-item" class="tc item">🎁</button>
+        <button id="tc-brake" class="tc small">🛑</button>
+        <button id="tc-gas" class="tc gas">🔥</button>
+      </div>
+      <button id="tc-auto" class="btn small">自動油門：開</button>
     </div>
 
     <div id="chat-overlay" class="chat-overlay">
@@ -162,6 +179,15 @@
       <h2>🏆 比賽結果</h2>
       <div id="result-list" class="list"></div>
       <button id="btn-result-close" class="btn primary big">回到房間</button>
+    </div>
+  </div>
+
+  <!-- 載入中 -->
+  <div id="dlg-loading" class="modal hidden">
+    <div class="card loading">
+      <h2>載入 3D 模型…</h2>
+      <div class="progress"><div id="load-bar"></div></div>
+      <p class="muted small">第一次載入約 3 MB，之後會快取。</p>
     </div>
   </div>
 

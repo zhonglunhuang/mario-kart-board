@@ -1,33 +1,15 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { buildKart, buildBanana, buildItemBox, buildStar, buildTree } from './characters.js';
+import { loadAssets, buildKart, buildBanana, buildItemBox, buildShell, cloneProp, instanced, transform, propSize, propMinY } from './models.js';
 
 const DEFS = window.DEFS;
-const N = DEFS.TRACK_LENGTH;
-const TILES = DEFS.TILES;
+const T = DEFS.TRACK;
+const SAMPLES = 2400;
+const HALF = T.width / 2;
 
-// 賽道控制點（封閉曲線）
-const CONTROL_POINTS = [
-  [0, 0, 0], [22, 0, -1], [40, 0.5, -10], [47, 2.5, -30], [36, 4.5, -52], [12, 5, -60],
-  [-14, 4, -56], [-32, 2, -42], [-50, 0.5, -26], [-46, 0, -6], [-28, 0, 5], [-12, 0, 3],
-];
-
-const TILE_COLORS = {
-  start: '#f5f5f5',
-  normal: '#5d5d66',
-  item: '#ffca28',
-  boost: '#ff7043',
-  hazard: '#3e2723',
-  star: '#ffd700',
-};
-
-const TILE_W = 7.0; // 橫向寬度
-const TILE_D = 3.6; // 沿賽道長度
-
-function makeTextSprite(text, { width = 128, size = 64, color = '#ffffff', bg = 'rgba(0,0,0,0.55)', font = 'bold 44px sans-serif' } = {}) {
+function makeTextSprite(text, { width = 256, height = 64, color = '#ffffff', bg = 'rgba(0,0,0,0.55)', font = 'bold 36px sans-serif' } = {}) {
   const c = document.createElement('canvas');
   c.width = width;
-  c.height = size;
+  c.height = height;
   const ctx = c.getContext('2d');
   ctx.fillStyle = bg;
   ctx.beginPath();
@@ -41,122 +23,125 @@ function makeTextSprite(text, { width = 128, size = 64, color = '#ffffff', bg = 
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
-  sp.scale.set(2.0, 1.0, 1);
+  sp.scale.set(width / 64, height / 64, 1);
   return sp;
 }
 
-function checkerTexture() {
+function checkerTexture(n = 8) {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
   const ctx = c.getContext('2d');
-  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+  const s = 64 / n;
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
     ctx.fillStyle = (x + y) % 2 ? '#111' : '#fff';
-    ctx.fillRect(x * 8, y * 8, 8, 8);
+    ctx.fillRect(x * s, y * s, s, s);
   }
   const t = new THREE.CanvasTexture(c);
   t.magFilter = THREE.NearestFilter;
   return t;
 }
 
-function chevronTexture() {
+function roadTexture() {
   const c = document.createElement('canvas');
-  c.width = 128;
-  c.height = 128;
+  c.width = 256;
+  c.height = 256;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#ff7043';
-  ctx.fillRect(0, 0, 128, 128);
-  ctx.fillStyle = '#fff59d';
-  for (let i = 0; i < 3; i++) {
-    const y = 20 + i * 36;
-    ctx.beginPath();
-    ctx.moveTo(24, y + 24);
-    ctx.lineTo(64, y);
-    ctx.lineTo(104, y + 24);
-    ctx.lineTo(104, y + 12);
-    ctx.lineTo(64, y - 12);
-    ctx.lineTo(24, y + 12);
-    ctx.closePath();
-    ctx.fill();
+  ctx.fillStyle = '#3b3b44';
+  ctx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 2500; i++) {
+    ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.07})`;
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+  }
+  ctx.fillStyle = '#e8d34a';
+  ctx.fillRect(124, 0, 8, 128);
+  ctx.fillStyle = '#f0f0f0';
+  ctx.fillRect(3, 0, 7, 256);
+  ctx.fillRect(246, 0, 7, 256);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+function grassTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#5fae3f';
+  ctx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 6000; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(0,40,0,0.07)';
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, 3, 3);
   }
   const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(120, 120);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
-export class KartScene {
-  constructor(canvas) {
+export class RaceScene {
+  /** 使用 RaceScene.create() 建立（需先載入模型） */
+  static async create(canvas, opts = {}) {
+    await loadAssets(opts.onProgress);
+    return new RaceScene(canvas, opts);
+  }
+
+  constructor(canvas, { mobile = false } = {}) {
     this.canvas = canvas;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.mobile = mobile;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !mobile, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, mobile ? 1.5 : 2));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#8fd3ff');
-    this.scene.fog = new THREE.Fog('#8fd3ff', 90, 220);
+    this.scene.fog = new THREE.Fog('#a9dcff', 170, 460);
 
-    this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 600);
-    this.camera.position.set(0, 26, 34);
+    this.camera = new THREE.PerspectiveCamera(62, 1, 0.5, 900);
+    this.camera.position.set(0, 12, 30);
+    this.camTarget = new THREE.Vector3();
 
-    this.controls = new OrbitControls(this.camera, canvas);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.08;
-    this.controls.maxPolarAngle = Math.PI / 2.15;
-    this.controls.minDistance = 6;
-    this.controls.maxDistance = 140;
-    this.controls.enablePan = false;
-    this.controls.target.set(0, 0, -10);
-    // 使用者拖曳時暫停跟隨，放開後恢復
-    this.userInteracting = false;
-    this.controls.addEventListener('start', () => (this.userInteracting = true));
-    this.controls.addEventListener('end', () => (this.userInteracting = false));
+    this.scene.add(new THREE.HemisphereLight('#ffffff', '#4f8a33', 1.0));
+    this.sun = new THREE.DirectionalLight('#fff4d6', 1.9);
+    this.sun.position.set(60, 120, 40);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(mobile ? 1024 : 2048, mobile ? 1024 : 2048);
+    const sc = this.sun.shadow.camera;
+    sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70; sc.near = 10; sc.far = 400;
+    this.sun.shadow.bias = -0.0006;
+    this.scene.add(this.sun);
+    this.scene.add(this.sun.target);
 
-    const hemi = new THREE.HemisphereLight('#ffffff', '#5b8c3a', 0.9);
-    this.scene.add(hemi);
-    const sun = new THREE.DirectionalLight('#fff4d6', 1.6);
-    sun.position.set(40, 70, 20);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -80;
-    sun.shadow.camera.right = 80;
-    sun.shadow.camera.top = 80;
-    sun.shadow.camera.bottom = -80;
-    sun.shadow.camera.far = 200;
-    sun.shadow.bias = -0.0005;
-    this.scene.add(sun);
-
-    this.curve = new THREE.CatmullRomCurve3(CONTROL_POINTS.map((p) => new THREE.Vector3(...p)), true, 'catmullrom', 0.5);
-    this.frames = [];
-    for (let i = 0; i < N; i++) {
-      const t = i / N;
+    this.curve = new THREE.CatmullRomCurve3(T.controlPoints.map((p) => new THREE.Vector3(...p)), true, 'catmullrom', 0.5);
+    this.samples = [];
+    const up = new THREE.Vector3(0, 1, 0);
+    for (let i = 0; i < SAMPLES; i++) {
+      const t = i / SAMPLES;
       const pos = this.curve.getPointAt(t);
       const tangent = this.curve.getTangentAt(t).normalize();
-      const right = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0)).normalize();
-      this.frames.push({ pos, tangent, right });
+      const right = new THREE.Vector3().crossVectors(tangent, up).normalize();
+      this.samples.push({ t, pos, tangent, right, yaw: Math.atan2(tangent.x, tangent.z) });
     }
 
-    this.spinners = [];
     this.karts = new Map();
-    this.bananaMeshes = new Map();
-    this.tweens = [];
-    this.followId = null;
-    this.followEnabled = true;
-    this.lastTarget = this.controls.target.clone();
+    this.shells = new Map();
+    this.bananas = new Map();
+    this.boxes = [];
+    this.spinners = [];
 
     this.buildWorld();
     this.buildTrack();
 
-    this.marker = new THREE.Mesh(new THREE.TorusGeometry(1.6, 0.12, 8, 32), new THREE.MeshBasicMaterial({ color: '#ffffff' }));
-    this.marker.rotation.x = Math.PI / 2;
-    this.marker.visible = false;
-    this.scene.add(this.marker);
-    this.markerId = null;
-
     this.resize();
     window.addEventListener('resize', () => this.resize());
+    this.onFrame = null;
     this.clock = new THREE.Clock();
-    this.running = true;
     this.renderer.setAnimationLoop(() => this.frame());
   }
 
@@ -168,28 +153,149 @@ export class KartScene {
     this.camera.updateProjectionMatrix();
   }
 
-  /* ---------- 建立世界 ---------- */
+  /* ---------- 賽道幾何查詢 ---------- */
+  sample(t) {
+    const i = ((Math.round(t * SAMPLES) % SAMPLES) + SAMPLES) % SAMPLES;
+    return this.samples[i];
+  }
+
+  closest(pos, hint) {
+    let best = -1;
+    let bestD = Infinity;
+    const check = (i) => {
+      const s = this.samples[((i % SAMPLES) + SAMPLES) % SAMPLES];
+      const dx = s.pos.x - pos.x;
+      const dz = s.pos.z - pos.z;
+      const d = dx * dx + dz * dz;
+      if (d < bestD) {
+        bestD = d;
+        best = ((i % SAMPLES) + SAMPLES) % SAMPLES;
+      }
+    };
+    if (hint === undefined || hint < 0) {
+      for (let i = 0; i < SAMPLES; i += 4) check(i);
+      const c = best;
+      for (let i = c - 4; i <= c + 4; i++) check(i);
+    } else {
+      for (let i = hint - 60; i <= hint + 60; i++) check(i);
+      if (bestD > 60 * 60) {
+        bestD = Infinity;
+        for (let i = 0; i < SAMPLES; i += 4) check(i);
+      }
+    }
+    const s = this.samples[best];
+    const lateral = (pos.x - s.pos.x) * s.right.x + (pos.z - s.pos.z) * s.right.z;
+    return { idx: best, t: s.t, lateral, center: s.pos, tangent: s.tangent, right: s.right };
+  }
+
+  /** 賽道旁的世界座標（lateral 為距中心線的橫向距離，正值為右側） */
+  side(t, lateral, y = 0) {
+    const s = this.sample(t);
+    return { pos: s.pos.clone().add(s.right.clone().multiplyScalar(lateral)).add(new THREE.Vector3(0, y, 0)), yaw: s.yaw, s };
+  }
+
+  gridPose(seat) {
+    const row = Math.floor(seat / 2);
+    const side = seat % 2 === 0 ? -1 : 1;
+    const s = this.sample(1 - 0.006 * (row + 1));
+    const pos = s.pos.clone().add(s.right.clone().multiplyScalar(side * 3.2));
+    return { x: pos.x, y: pos.y, z: pos.z, rot: s.yaw };
+  }
+
+  /** 檢查某點是否離賽道夠遠 */
+  farFromTrack(x, z, margin) {
+    for (let i = 0; i < SAMPLES; i += 8) {
+      const s = this.samples[i];
+      const dx = s.pos.x - x;
+      const dz = s.pos.z - z;
+      if (dx * dx + dz * dz < margin * margin) return false;
+    }
+    return true;
+  }
+
+  /* ---------- 世界 ---------- */
   buildWorld() {
-    const ground = new THREE.Mesh(new THREE.CircleGeometry(260, 48), new THREE.MeshStandardMaterial({ color: '#6fbf4a', roughness: 1 }));
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(700, 64), new THREE.MeshStandardMaterial({ map: grassTexture(), roughness: 1 }));
     ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.3;
+    ground.position.y = -0.35;
     ground.receiveShadow = true;
     this.scene.add(ground);
 
-    // 賽道底下的柏油緞帶
-    const seg = 320;
+    // 樹木、岩石、花草（InstancedMesh）
+    const treeKinds = ['tree_default', 'tree_detailed', 'tree_oak', 'tree_pineDefaultA', 'tree_pineRoundA'];
+    const buckets = {};
+    const add = (name, x, z, yaw, scale) => {
+      (buckets[name] ||= []).push(transform(x, -0.35 - propMinY('nature', name) * scale, z, yaw, scale));
+    };
+    const count = this.mobile ? 140 : 260;
+    let placed = 0;
+    let tries = 0;
+    while (placed < count && tries < 8000) {
+      tries++;
+      const x = (Math.random() - 0.5) * 460;
+      const z = -75 + (Math.random() - 0.5) * 420;
+      if (z > 12 && Math.abs(x) < 46) continue;
+      if (!this.farFromTrack(x, z, HALF + 9)) continue;
+      const r = Math.random();
+      if (r < 0.62) add(treeKinds[Math.floor(Math.random() * treeKinds.length)], x, z, Math.random() * Math.PI * 2, 5 + Math.random() * 4);
+      else if (r < 0.75) add(Math.random() < 0.5 ? 'rock_largeA' : 'rock_largeB', x, z, Math.random() * Math.PI * 2, 3 + Math.random() * 4);
+      else if (r < 0.9) add(['flower_redA', 'flower_yellowA', 'flower_purpleA'][Math.floor(Math.random() * 3)], x, z, Math.random() * Math.PI * 2, 4 + Math.random() * 2);
+      else add(Math.random() < 0.5 ? 'mushroom_red' : 'mushroom_tan', x, z, Math.random() * Math.PI * 2, 3 + Math.random() * 2);
+      placed++;
+    }
+    // 賽道邊的草叢
+    for (let i = 0; i < 90; i++) {
+      const t = Math.random();
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const p = this.side(t, side * (HALF + 3 + Math.random() * 3));
+      add('grass_large', p.pos.x, p.pos.z, Math.random() * Math.PI * 2, 3 + Math.random() * 2);
+    }
+    for (const [name, list] of Object.entries(buckets)) this.scene.add(instanced('nature', name, list));
+
+    // 雲
+    this.clouds = new THREE.Group();
+    const cloudMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1 });
+    for (let i = 0; i < 14; i++) {
+      const c = new THREE.Group();
+      for (let j = 0; j < 4; j++) {
+        const s = new THREE.Mesh(new THREE.SphereGeometry(4 + Math.random() * 4, 8, 8), cloudMat);
+        s.position.set(j * 5 - 8, Math.random() * 2, Math.random() * 4);
+        c.add(s);
+      }
+      c.position.set((Math.random() - 0.5) * 600, 70 + Math.random() * 30, -80 + (Math.random() - 0.5) * 500);
+      c.userData.speed = 1 + Math.random() * 1.5;
+      this.clouds.add(c);
+    }
+    this.scene.add(this.clouds);
+
+    // 遠山
+    const hillMat = new THREE.MeshStandardMaterial({ color: '#4e8f3f', roughness: 1 });
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * Math.PI * 2;
+      const r = 380 + Math.random() * 120;
+      const h = 40 + Math.random() * 60;
+      const hill = new THREE.Mesh(new THREE.ConeGeometry(60 + Math.random() * 60, h, 7), hillMat);
+      hill.position.set(Math.cos(a) * r, h / 2 - 10, -75 + Math.sin(a) * r);
+      this.scene.add(hill);
+    }
+  }
+
+  buildTrack() {
+    // 路面
+    const seg = 700;
     const verts = [];
     const uvs = [];
     const idx = [];
+    const up = new THREE.Vector3(0, 1, 0);
     for (let i = 0; i <= seg; i++) {
       const t = (i % seg) / seg;
       const p = this.curve.getPointAt(t);
       const tan = this.curve.getTangentAt(t).normalize();
-      const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(TILE_W / 2 + 0.8);
+      const right = new THREE.Vector3().crossVectors(tan, up).normalize().multiplyScalar(HALF);
       const l = p.clone().sub(right);
       const r = p.clone().add(right);
-      verts.push(l.x, l.y - 0.25, l.z, r.x, r.y - 0.25, r.z);
-      uvs.push(0, i, 1, i);
+      verts.push(l.x, l.y, l.z, r.x, r.y, r.z);
+      uvs.push(0, i * 0.35, 1, i * 0.35);
       if (i < seg) {
         const a = i * 2;
         idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
@@ -200,172 +306,124 @@ export class KartScene {
     rg.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     rg.setIndex(idx);
     rg.computeVertexNormals();
-    const road = new THREE.Mesh(rg, new THREE.MeshStandardMaterial({ color: '#3a3a42', roughness: 0.95, side: THREE.DoubleSide }));
+    const road = new THREE.Mesh(rg, new THREE.MeshStandardMaterial({ map: roadTexture(), roughness: 0.95, side: THREE.DoubleSide }));
     road.receiveShadow = true;
     this.scene.add(road);
 
-    // 樹木
-    const treeGroup = new THREE.Group();
-    const samples = this.curve.getSpacedPoints(200);
-    let placed = 0;
-    let tries = 0;
-    while (placed < 70 && tries < 2000) {
-      tries++;
-      const x = (Math.random() - 0.5) * 170;
-      const z = -28 + (Math.random() - 0.5) * 150;
-      if (z > 8 && Math.abs(x) < 30) continue; // 起點前方留空，避免擋住預設鏡頭
-      let ok = true;
-      for (const s of samples) {
-        if ((s.x - x) ** 2 + (s.z - z) ** 2 < 11 * 11) {
-          ok = false;
-          break;
-        }
+    // 護欄（Racing Kit barrier，紅白交錯，InstancedMesh）
+    const bSize = propSize('racing', 'barrierRed');
+    const bScale = 1.1 / bSize.y;
+    const bLen = bSize.x * bScale;
+    const red = [];
+    const white = [];
+    let acc = 0;
+    let n = 0;
+    for (let i = 0; i < SAMPLES; i++) {
+      const s = this.samples[i];
+      const next = this.samples[(i + 1) % SAMPLES];
+      acc += s.pos.distanceTo(next.pos);
+      if (acc < bLen) continue;
+      acc = 0;
+      for (const side of [-1, 1]) {
+        const p = s.pos.clone().add(s.right.clone().multiplyScalar(side * (HALF + 0.9)));
+        (n % 2 ? red : white).push(transform(p.x, p.y - propMinY('racing', 'barrierRed') * bScale, p.z, s.yaw + Math.PI / 2, bScale));
       }
-      if (!ok) continue;
-      const tree = buildTree(0.8 + Math.random() * 0.9);
-      tree.position.set(x, -0.3, z);
-      treeGroup.add(tree);
-      placed++;
+      n++;
     }
-    this.scene.add(treeGroup);
+    this.scene.add(instanced('racing', 'barrierRed', red), instanced('racing', 'barrierWhite', white));
 
-    // 雲
-    this.clouds = new THREE.Group();
-    const cloudMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1 });
-    for (let i = 0; i < 12; i++) {
-      const c = new THREE.Group();
-      for (let j = 0; j < 4; j++) {
-        const s = new THREE.Mesh(new THREE.SphereGeometry(2 + Math.random() * 2, 8, 8), cloudMat);
-        s.position.set(j * 2.5 - 4, Math.random() * 1.2, Math.random() * 2);
-        c.add(s);
-      }
-      c.position.set((Math.random() - 0.5) * 220, 32 + Math.random() * 14, -30 + (Math.random() - 0.5) * 200);
-      c.userData.speed = 0.4 + Math.random() * 0.6;
-      this.clouds.add(c);
+    // 起點線 + 拱門
+    const s0 = this.sample(0);
+    const line = new THREE.Mesh(new THREE.PlaneGeometry(T.width, 3.2), new THREE.MeshStandardMaterial({ map: checkerTexture(12) }));
+    line.position.copy(s0.pos).add(new THREE.Vector3(0, 0.03, 0));
+    line.lookAt(line.position.clone().add(s0.tangent));
+    line.rotateX(-Math.PI / 2);
+    this.scene.add(line);
+    const gate = cloneProp('racing', 'overhead');
+    const gSize = propSize('racing', 'overhead');
+    const gScale = (T.width + 6) / gSize.x;
+    gate.scale.setScalar(gScale);
+    gate.position.copy(s0.pos).add(new THREE.Vector3(0, -propMinY('racing', 'overhead') * gScale, 0));
+    gate.rotation.y = s0.yaw + Math.PI / 2;
+    this.scene.add(gate);
+    const flag = makeTextSprite('🏁 FINISH', { width: 320, height: 80, bg: 'rgba(229,37,33,0.9)', font: 'bold 44px sans-serif' });
+    flag.position.copy(s0.pos).add(new THREE.Vector3(0, gSize.y * gScale + 2.5, 0));
+    flag.scale.set(10, 2.5, 1);
+    this.scene.add(flag);
+
+    // 看台、帳篷、廣告牌、燈柱
+    const placeProp = (name, t, lateral, yawOffset, height) => {
+      const p = this.side(t, lateral);
+      const sz = propSize('racing', name);
+      const sc = height / sz.y;
+      const g = cloneProp('racing', name);
+      g.scale.setScalar(sc);
+      g.position.copy(p.pos).add(new THREE.Vector3(0, -propMinY('racing', name) * sc, 0));
+      g.rotation.y = p.yaw + yawOffset;
+      this.scene.add(g);
+      return g;
+    };
+    placeProp('grandStandCovered', 0.03, HALF + 14, Math.PI / 2, 12);
+    placeProp('grandStand', 0.055, HALF + 13, Math.PI / 2, 9);
+    placeProp('grandStand', 0.975, -(HALF + 13), -Math.PI / 2, 9);
+    placeProp('tent', 0.93, -(HALF + 9), -Math.PI / 2, 5);
+    placeProp('tent', 0.95, -(HALF + 9), -Math.PI / 2, 5);
+    placeProp('billboard', 0.4, HALF + 8, Math.PI / 2, 7);
+    placeProp('billboard', 0.62, -(HALF + 8), -Math.PI / 2, 7);
+    placeProp('grandStand', 0.5, -(HALF + 12), -Math.PI / 2, 9);
+    for (let i = 0; i < 16; i++) {
+      const t = (i + 0.5) / 16;
+      placeProp('lightPostModern', t, (i % 2 ? 1 : -1) * (HALF + 3.2), i % 2 ? Math.PI / 2 : -Math.PI / 2, 9);
     }
-    this.scene.add(this.clouds);
-  }
+    // 檢查點旗幟
+    for (const cp of T.checkpoints) {
+      for (const side of [-1, 1]) placeProp('flagCheckers', cp, side * (HALF + 2.2), side > 0 ? Math.PI / 2 : -Math.PI / 2, 5);
+    }
+    // 三角錐點綴
+    for (let i = 0; i < 10; i++) placeProp('pylon', Math.random(), (Math.random() < 0.5 ? -1 : 1) * (HALF + 1.8), 0, 0.9);
 
-  buildTrack() {
-    const tileGeo = new THREE.BoxGeometry(TILE_W, 0.5, TILE_D);
-    const chev = chevronTexture();
-    const checker = checkerTexture();
-    for (let i = 0; i < N; i++) {
-      const f = this.frames[i];
-      const type = TILES[i];
-      const m = new THREE.MeshStandardMaterial({ color: TILE_COLORS[type], roughness: 0.8 });
-      if (type === 'normal' && i % 2 === 0) m.color.set('#6b6b75');
-      const tile = new THREE.Mesh(tileGeo, m);
-      tile.position.copy(f.pos);
-      tile.lookAt(f.pos.clone().add(f.tangent));
-      tile.receiveShadow = true;
-      tile.castShadow = false;
-      this.scene.add(tile);
-
-      // 邊緣白線
-      const edge = new THREE.Mesh(new THREE.BoxGeometry(TILE_W + 0.3, 0.1, 0.25), new THREE.MeshStandardMaterial({ color: '#ffffff' }));
-      edge.position.copy(f.pos).add(new THREE.Vector3(0, 0.22, 0)).add(f.tangent.clone().multiplyScalar(TILE_D / 2));
-      edge.lookAt(edge.position.clone().add(f.tangent));
-      this.scene.add(edge);
-
-      // 格號
-      const label = makeTextSprite(String(i), { bg: 'rgba(0,0,0,0.5)' });
-      label.position.copy(f.pos).add(f.right.clone().multiplyScalar(TILE_W / 2 + 1.6)).add(new THREE.Vector3(0, 1.2, 0));
-      label.scale.set(1.6, 0.8, 1);
-      this.scene.add(label);
-
-      // 特殊格裝飾
-      const up = new THREE.Vector3(0, 0.26, 0);
-      if (type === 'start') {
-        const top = new THREE.Mesh(new THREE.PlaneGeometry(TILE_W, TILE_D), new THREE.MeshStandardMaterial({ map: checker }));
-        top.position.copy(f.pos).add(up);
-        top.lookAt(top.position.clone().add(f.tangent));
-        top.rotateX(-Math.PI / 2);
-        this.scene.add(top);
-        // 拱門
-        const postMat = new THREE.MeshStandardMaterial({ color: '#e52521' });
-        for (const side of [-1, 1]) {
-          const post = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 7, 10), postMat);
-          post.position.copy(f.pos).add(f.right.clone().multiplyScalar(side * (TILE_W / 2 + 0.6))).add(new THREE.Vector3(0, 3.5, 0));
-          post.castShadow = true;
-          this.scene.add(post);
-        }
-        const beam = new THREE.Mesh(new THREE.BoxGeometry(TILE_W + 1.7, 0.9, 0.6), new THREE.MeshStandardMaterial({ map: checker }));
-        beam.position.copy(f.pos).add(new THREE.Vector3(0, 7, 0));
-        beam.lookAt(beam.position.clone().add(f.tangent));
-        this.scene.add(beam);
-        const flag = makeTextSprite('🏁 START', { width: 256, bg: 'rgba(229,37,33,0.9)', font: 'bold 40px sans-serif' });
-        flag.position.copy(f.pos).add(new THREE.Vector3(0, 8.4, 0));
-        flag.scale.set(4, 2, 1);
-        this.scene.add(flag);
-      } else if (type === 'item') {
-        const ib = buildItemBox();
-        ib.position.copy(f.pos).add(new THREE.Vector3(0, 1.6, 0));
-        this.spinners.push(ib);
-        this.scene.add(ib);
-      } else if (type === 'boost') {
-        const top = new THREE.Mesh(new THREE.PlaneGeometry(TILE_W - 0.6, TILE_D - 0.4), new THREE.MeshStandardMaterial({ map: chev, emissive: '#ff5722', emissiveIntensity: 0.25 }));
-        top.position.copy(f.pos).add(up);
-        top.lookAt(top.position.clone().add(f.tangent));
-        top.rotateX(-Math.PI / 2);
-        this.scene.add(top);
-      } else if (type === 'hazard') {
-        const oil = new THREE.Mesh(new THREE.CircleGeometry(1.5, 16), new THREE.MeshStandardMaterial({ color: '#111', roughness: 0.2, metalness: 0.6 }));
-        oil.position.copy(f.pos).add(up);
-        oil.rotation.x = -Math.PI / 2;
-        oil.scale.set(1.6, 1, 1);
-        this.scene.add(oil);
-        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.2, 12), new THREE.MeshStandardMaterial({ color: '#8d6e63' }));
-        barrel.position.copy(f.pos).add(f.right.clone().multiplyScalar(TILE_W / 2 + 1.0)).add(new THREE.Vector3(0, 0.6, 0));
-        barrel.castShadow = true;
-        this.scene.add(barrel);
-      } else if (type === 'star') {
-        const st = buildStar();
-        st.position.copy(f.pos).add(new THREE.Vector3(0, 1.8, 0));
-        this.spinners.push(st);
-        this.scene.add(st);
-      }
+    // 道具箱
+    this.boxPositions = [];
+    for (const b of T.itemBoxes) {
+      const s = this.sample(b.t);
+      const pos = s.pos.clone().add(s.right.clone().multiplyScalar(b.lane * (HALF - 2.5))).add(new THREE.Vector3(0, 1.7, 0));
+      const mesh = buildItemBox();
+      mesh.scale.setScalar(1.4);
+      mesh.position.copy(pos);
+      this.scene.add(mesh);
+      this.spinners.push(mesh);
+      this.boxes.push(mesh);
+      this.boxPositions.push(pos);
     }
   }
 
-  /* ---------- 位置 ---------- */
-  slotPosition(absPos, seat) {
-    const i = ((absPos % N) + N) % N;
-    const f = this.frames[i];
-    const lane = ((seat % 4) - 1.5) * 1.55;
-    const along = seat >= 4 ? 0.9 : -0.3;
-    return f.pos.clone().add(f.right.clone().multiplyScalar(lane)).add(f.tangent.clone().multiplyScalar(along)).add(new THREE.Vector3(0, 0.25, 0));
+  setBoxes(available) {
+    if (!available) return;
+    available.forEach((ok, i) => {
+      const m = this.boxes[i];
+      if (m) m.visible = !!ok;
+    });
   }
 
-  orientKart(group, absPos) {
-    const i = ((absPos % N) + N) % N;
-    const f = this.frames[i];
-    const target = group.position.clone().add(f.tangent);
-    group.lookAt(target);
-  }
-
-  setPlayers(players) {
-    for (const [, k] of this.karts) this.scene.remove(k.group);
-    this.karts.clear();
-    for (const p of players) {
-      const ch = DEFS.CHARACTERS.find((c) => c.id === p.character) || DEFS.CHARACTERS[0];
-      const kart = DEFS.KARTS.find((k) => k.id === p.kart) || DEFS.KARTS[0];
-      const group = buildKart(ch, kart);
-      group.traverse((o) => {
-        if (o.isMesh) o.castShadow = true;
-      });
-      this.scene.add(group);
-      this.karts.set(p.id, { group, pos: p.pos, seat: p.seat, color: ch.color });
-      this.placeKart(p.id, p.pos);
-    }
-  }
-
-  placeKart(id, absPos) {
-    const k = this.karts.get(id);
-    if (!k) return;
-    k.pos = absPos;
-    k.group.position.copy(this.slotPosition(absPos, k.seat));
-    this.orientKart(k.group, absPos);
+  /* ---------- 車輛 ---------- */
+  addKart(p, isLocal) {
+    if (this.karts.has(p.id)) return this.karts.get(p.id);
+    const ch = DEFS.CHARACTERS.find((c) => c.id === p.character) || DEFS.CHARACTERS[0];
+    const kart = DEFS.KARTS.find((k) => k.id === p.kart) || DEFS.KARTS[0];
+    const group = buildKart(ch, kart);
+    group.rotation.order = 'YXZ';
+    const label = makeTextSprite(p.name, { width: 256, height: 64, bg: 'rgba(0,0,0,0.5)' });
+    label.position.set(0, 3.6, 0);
+    label.scale.set(4, 1, 1);
+    label.visible = !isLocal;
+    group.add(label);
+    const star = new THREE.PointLight('#ffd700', 0, 12);
+    star.position.set(0, 1.5, 0);
+    group.add(star);
+    this.scene.add(group);
+    const k = { id: p.id, group, color: ch.color, label, star, heavy: !!kart.heavy, x: 0, y: 0, z: 0, rot: 0, speed: 0, stamp: 0, dispX: 0, dispZ: 0, dispY: 0, dispRot: 0, spinPhase: 0, hint: -1, isLocal: !!isLocal };
+    this.karts.set(p.id, k);
+    return k;
   }
 
   removeKart(id) {
@@ -375,132 +433,110 @@ export class KartScene {
     this.karts.delete(id);
   }
 
-  tween(dur, fn) {
-    return new Promise((resolve) => {
-      this.tweens.push({ start: performance.now(), dur, fn, resolve });
-    });
+  poseKart(k, x, y, z, rot, extraYaw = 0) {
+    k.dispX = x;
+    k.dispY = y;
+    k.dispZ = z;
+    k.dispRot = rot;
+    k.group.position.set(x, y, z);
+    const c = this.closest(k.group.position, k.hint);
+    k.hint = c.idx;
+    const fwdX = Math.sin(rot);
+    const fwdZ = Math.cos(rot);
+    const along = fwdX * c.tangent.x + fwdZ * c.tangent.z;
+    const pitch = Math.asin(Math.max(-1, Math.min(1, c.tangent.y))) * along;
+    k.group.rotation.set(-pitch, rot + extraYaw, 0);
   }
 
-  /** 逐格移動動畫；kind 決定特效 */
-  async animateMove(id, from, to, kind) {
-    const k = this.karts.get(id);
-    if (!k) return;
-    const dir = to > from ? 1 : -1;
-    const backwards = dir < 0;
-    const hit = ['bump', 'banana', 'green', 'red', 'blue', 'lightning'].includes(kind);
-    let cur = from;
-    while (cur !== to) {
-      const next = cur + dir;
-      const a = this.slotPosition(cur, k.seat);
-      const b = this.slotPosition(next, k.seat);
-      const dur = kind === 'boost' || kind === 'mushroom' ? 140 : backwards ? 240 : 200;
-      const startRot = k.group.rotation.y;
-      await this.tween(dur, (t) => {
-        const e = backwards ? t : t * t * (3 - 2 * t);
-        k.group.position.lerpVectors(a, b, e);
-        k.group.position.y += Math.sin(t * Math.PI) * (hit ? 1.2 : backwards ? 0.15 : 0.45);
-        for (const w of k.group.userData.wheels) w.rotation.x += 0.35 * dir;
-        if (hit) k.group.rotation.y = startRot + t * Math.PI * 2;
-      });
-      cur = next;
-      k.pos = cur;
-      this.orientKart(k.group, cur);
-    }
-    k.group.position.copy(this.slotPosition(to, k.seat));
-    this.orientKart(k.group, to);
-  }
-
-  setBananas(map) {
-    const want = new Set(Object.keys(map || {}).map((s) => Number(s)));
-    for (const [tile, mesh] of this.bananaMeshes) {
-      if (!want.has(tile)) {
-        this.scene.remove(mesh);
-        this.bananaMeshes.delete(tile);
+  /* ---------- 道具物件 ---------- */
+  syncBananas(list) {
+    const want = new Set(list.map((b) => b.id));
+    for (const [id, m] of this.bananas) {
+      if (!want.has(id)) {
+        this.scene.remove(m);
+        this.bananas.delete(id);
       }
     }
-    for (const tile of want) {
-      if (this.bananaMeshes.has(tile)) continue;
-      const b = buildBanana();
-      const f = this.frames[tile];
-      b.position.copy(f.pos).add(new THREE.Vector3(0, 0.3, 0)).add(f.right.clone().multiplyScalar(2.6));
-      b.rotation.y = Math.random() * Math.PI;
-      this.scene.add(b);
-      this.bananaMeshes.set(tile, b);
+    for (const b of list) {
+      if (this.bananas.has(b.id)) continue;
+      const m = buildBanana();
+      m.scale.setScalar(1.7);
+      m.position.set(b.x, b.y + 0.2, b.z);
+      m.rotation.y = Math.random() * Math.PI;
+      this.scene.add(m);
+      this.bananas.set(b.id, m);
     }
   }
 
-  setCurrent(id) {
-    this.markerId = id;
-    const k = id ? this.karts.get(id) : null;
-    this.marker.visible = !!k;
-    if (k) this.marker.material.color.set(k.color);
+  syncShells(list) {
+    const want = new Set(list.map((s) => s.id));
+    for (const [id, m] of this.shells) {
+      if (!want.has(id)) {
+        this.scene.remove(m);
+        this.shells.delete(id);
+      }
+    }
+    for (const s of list) {
+      let m = this.shells.get(s.id);
+      if (!m) {
+        m = buildShell(s.kind);
+        this.scene.add(m);
+        this.shells.set(s.id, m);
+        m.position.set(s.x, s.y + 0.6, s.z);
+      }
+      m.userData.target = { x: s.x, y: s.y + 0.6, z: s.z };
+      m.userData.owned = !!s.owned;
+      if (s.owned) m.position.set(s.x, s.y + 0.6, s.z);
+    }
   }
 
-  focus(id) {
-    this.followId = id;
-  }
-
-  setFollow(enabled) {
-    this.followEnabled = enabled;
-  }
-
-  overview() {
-    this.followEnabled = false;
-    this.camera.position.set(0, 95, 45);
-    this.controls.target.set(0, 0, -28);
-    this.lastTarget.copy(this.controls.target);
+  /* ---------- 鏡頭 ---------- */
+  chase(k, dt, finished) {
+    if (!k) return;
+    const fwd = new THREE.Vector3(Math.sin(k.dispRot), 0, Math.cos(k.dispRot));
+    const pos = k.group.position;
+    let desired;
+    if (finished) {
+      const a = performance.now() / 2500;
+      desired = pos.clone().add(new THREE.Vector3(Math.sin(a) * 14, 6, Math.cos(a) * 14));
+    } else {
+      const speedK = Math.min(1, Math.abs(k.speed) / 45);
+      desired = pos.clone().sub(fwd.clone().multiplyScalar(9.5 + speedK * 3)).add(new THREE.Vector3(0, 4.4 + speedK * 0.8, 0));
+    }
+    const s = 1 - Math.pow(0.0005, dt);
+    this.camera.position.lerp(desired, s);
+    const look = pos.clone().add(fwd.multiplyScalar(6)).add(new THREE.Vector3(0, 1.3, 0));
+    this.camTarget.lerp(look, 1 - Math.pow(0.0001, dt));
+    this.camera.lookAt(this.camTarget);
+    this.sun.position.copy(pos).add(new THREE.Vector3(60, 120, 40));
+    this.sun.target.position.copy(pos);
   }
 
   frame() {
-    const dt = Math.min(this.clock.getDelta(), 0.1);
-    const now = performance.now();
-    const t = now / 1000;
-
-    for (let i = this.tweens.length - 1; i >= 0; i--) {
-      const tw = this.tweens[i];
-      const p = Math.min(1, (now - tw.start) / tw.dur);
-      tw.fn(p);
-      if (p >= 1) {
-        this.tweens.splice(i, 1);
-        tw.resolve();
-      }
-    }
-
+    const dt = Math.min(this.clock.getDelta(), 0.05);
+    const t = performance.now() / 1000;
     for (const s of this.spinners) {
-      s.rotation.y += dt * 1.5;
-      s.rotation.x += dt * 0.7;
-      s.position.y += Math.sin(t * 2 + s.position.x) * 0.004;
+      s.rotation.y += dt * 1.6;
+      s.rotation.x += dt * 0.8;
     }
     for (const c of this.clouds.children) {
       c.position.x += dt * c.userData.speed;
-      if (c.position.x > 130) c.position.x = -130;
+      if (c.position.x > 320) c.position.x = -320;
     }
-
-    if (this.markerId) {
-      const k = this.karts.get(this.markerId);
-      if (k) {
-        this.marker.position.copy(k.group.position).setY(k.group.position.y + 0.05);
-        this.marker.rotation.z += dt * 2;
+    for (const [, m] of this.shells) {
+      if (!m.userData.owned && m.userData.target) {
+        const tg = m.userData.target;
+        m.position.lerp(new THREE.Vector3(tg.x, tg.y, tg.z), 1 - Math.pow(0.001, dt));
       }
+      m.rotation.y += dt * 8;
     }
-
-    if (this.followEnabled && this.followId && !this.userInteracting) {
-      const k = this.karts.get(this.followId);
-      if (k) {
-        const want = k.group.position.clone().add(new THREE.Vector3(0, 0.8, 0));
-        const next = this.controls.target.clone().lerp(want, 1 - Math.pow(0.001, dt));
-        const delta = next.clone().sub(this.controls.target);
-        this.controls.target.copy(next);
-        this.camera.position.add(delta);
-        const dist = this.camera.position.distanceTo(this.controls.target);
-        if (dist > 40) {
-          const dirv = this.camera.position.clone().sub(this.controls.target).normalize();
-          this.camera.position.copy(this.controls.target).add(dirv.multiplyScalar(THREE.MathUtils.lerp(dist, 26, 1 - Math.pow(0.05, dt))));
-        }
-      }
+    for (const [, b] of this.bananas) b.rotation.y += dt * 0.5;
+    for (const [, k] of this.karts) {
+      for (const w of k.group.userData.wheels) w.rotation.x += k.speed * dt * 0.9;
+      k.group.userData.mixer?.update(dt * (0.6 + Math.min(1, Math.abs(k.speed) / 30)));
+      k.star.intensity = k.starOn ? 4 + Math.sin(t * 20) * 2 : 0;
     }
-
-    this.controls.update();
+    if (this.onFrame) this.onFrame(dt);
     this.renderer.render(this.scene, this.camera);
   }
 }
