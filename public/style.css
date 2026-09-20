@@ -214,7 +214,7 @@ select option { color: #000; }
 #touch-controls > * { pointer-events: auto; }
 .tc-group { position: fixed; bottom: calc(18px + var(--safe-bottom)); display: flex; gap: 12px; align-items: flex-end; }
 .tc-group.left { left: calc(14px + var(--safe-left)); }
-.tc-group.right { right: calc(14px + var(--safe-right)); }
+.tc-group.right { right: calc(14px + var(--safe-right)); flex-wrap: wrap; justify-content: flex-end; max-width: 240px; }
 .tc {
   width: 78px; height: 78px; border-radius: 50%;
   background: rgba(255, 255, 255, 0.16); border: 2px solid rgba(255, 255, 255, 0.35); color: #fff;
@@ -306,4 +306,26 @@ select option { color: #000; }
 .btn.live { background: rgba(67, 176, 71, 0.35); border-color: var(--ok); box-shadow: 0 0 12px rgba(67, 176, 71, 0.5); }
 @media (max-width: 720px) {
   .item-name { right: auto; left: 50%; transform: translateX(-50%); bottom: calc(112px + var(--safe-bottom)); max-width: 80vw; text-align: center; }
+}
+
+/* ---------- 搖桿 / 漂移 / 其他 HUD ---------- */
+#joystick { position: fixed; left: calc(18px + var(--safe-left)); bottom: calc(18px + var(--safe-bottom)); width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.3); touch-action: none; backdrop-filter: blur(6px); }
+#joystick-knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: rgba(255,255,255,0.55); box-shadow: 0 4px 12px rgba(0,0,0,0.4); pointer-events: none; }
+.tc.drift { width: 84px; height: 84px; font-size: 18px; background: rgba(79,195,247,0.35); border-color: rgba(79,195,247,0.9); }
+.tc.tiny { position: fixed; right: calc(14px + var(--safe-right)); bottom: calc(190px + var(--safe-bottom)); width: 46px; height: 46px; font-size: 20px; }
+.tc-top { position: fixed; right: calc(14px + var(--safe-right)); top: calc(56px + var(--safe-top)); display: flex; gap: 6px; }
+#tc-auto { position: static; }
+#drift-bar { position: fixed; left: 50%; bottom: calc(140px + var(--safe-bottom)); transform: translateX(-50%); width: 160px; height: 10px; border-radius: 5px; background: rgba(0,0,0,0.5); border: 1px solid var(--border); overflow: hidden; pointer-events: none !important; }
+#drift-bar i { display: block; height: 100%; width: 0; background: #fff; transition: width 0.05s; }
+#flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none !important; transition: opacity 0.25s; z-index: 30; }
+.item-slot.rolling, .tc.item.rolling { animation: roll 0.15s infinite; border-color: var(--accent); }
+@keyframes roll { 0% { transform: translateY(-3px); } 50% { transform: translateY(3px); } 100% { transform: translateY(-3px); } }
+#rotate-hint { position: fixed; inset: 0; z-index: 180; background: rgba(10,12,30,0.92); display: flex; align-items: center; justify-content: center; text-align: center; font-size: 22px; font-weight: 700; line-height: 1.6; }
+#rotate-hint .btn { margin-top: 14px; }
+.field.check { gap: 6px; }
+.field.check input { width: auto; }
+@media (max-width: 720px) {
+  .tc-group.right { max-width: 200px; }
+  .tc.drift { width: 72px; height: 72px; font-size: 16px; }
+  #drift-bar { bottom: calc(126px + var(--safe-bottom)); width: 120px; }
 }

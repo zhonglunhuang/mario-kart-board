@@ -54,7 +54,7 @@ test('two players can create/join a room and finish a race', async (t) => {
   const jb = await ask(b, 'join', { name: 'Bob', character: 'yoshi', kart: 'offroad' });
   assert.ok(ja.playerId && jb.playerId);
 
-  const created = await ask(a, 'room:create', { name: '測試房', laps: 1, maxPlayers: 4 });
+  const created = await ask(a, 'room:create', { name: '測試房', laps: 1, maxPlayers: 4, bots: 2, difficulty: 'hard' });
   assert.ok(created.room, JSON.stringify(created));
   const rooms = await ask(b, 'rooms:list');
   assert.strictEqual(rooms.length, 1);
@@ -71,7 +71,10 @@ test('two players can create/join a room and finish a race', async (t) => {
   assert.ok(res.ok, JSON.stringify(res));
   const sa = await startA;
   assert.strictEqual(sa.state.phase, 'countdown');
-  assert.strictEqual(sa.state.players.length, 2);
+  assert.strictEqual(sa.state.players.length, 4, '2 真人 + 2 AI');
+  assert.strictEqual(sa.state.players.filter((p) => p.bot).length, 2);
+  assert.strictEqual(sa.state.hostId, ja.playerId);
+  const botId = sa.state.players.find((p) => p.bot).id;
 
   // 倒數結束
   await waitEvent(a, 'go', 8000);
@@ -85,6 +88,17 @@ test('two players can create/join a room and finish a race', async (t) => {
   assert.ok(again.error, '同一個箱子要等重生');
   const use = await ask(a, 'race:use', { x: 0, y: 0, z: 0 });
   assert.ok(use.ok, JSON.stringify(use));
+  // 房主可代 AI 車撿道具與回報位置；非房主不行
+  const botPick = await ask(a, 'race:pickup', { box: 1, as: botId });
+  assert.ok(botPick.ok && botPick.item, JSON.stringify(botPick));
+  const botPickB = await ask(b, 'race:pickup', { box: 2, as: botId });
+  assert.ok(botPickB.error, '非房主不能代 AI 撿道具');
+  a.emit('race:state', { x: 1, y: 0, z: 1, rot: 0, speed: 10, t: 0.01, bots: [{ id: botId, x: 5, y: 0, z: 5, rot: 0, speed: 20, t: 0.02 }] });
+  await wait(120);
+  const snapB = await once(b, 'race:snapshot');
+  const botSnap = snapB.players.find((p) => p.id === botId);
+  assert.strictEqual(botSnap.x, 5, 'AI 位置由房主回報');
+  assert.ok(botSnap.item, 'AI 有道具');
 
   // Alice 沿著賽道進度 t 前進一圈（經過三個檢查點再回到 0）
   const steps = [0.1, 0.2, 0.3, 0.45, 0.55, 0.7, 0.8, 0.9, 0.97, 0.02];
@@ -104,7 +118,7 @@ test('two players can create/join a room and finish a race', async (t) => {
     await wait(30);
   }
   const over = await overP;
-  assert.strictEqual(over.result.finishOrder.length, 2);
+  assert.strictEqual(over.result.finishOrder.length, 4, '真人 + AI 都會排名');
   assert.strictEqual(over.result.players[0].name, 'Alice');
   assert.strictEqual(over.room.status, 'waiting');
   console.log(`race finished: ${over.result.players.map((p) => `${p.rank}.${p.name}`).join(' ')}`);

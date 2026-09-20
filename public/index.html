@@ -104,6 +104,14 @@
         </select>
       </label>
       <div class="row">
+        <label class="field inline">電腦車手
+          <select id="in-room-bots"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="5">5</option><option value="7">7</option></select>
+        </label>
+        <label class="field inline">難度
+          <select id="in-room-diff"><option value="easy">簡單</option><option value="normal" selected>普通</option><option value="hard">困難</option></select>
+        </label>
+      </div>
+      <div class="row">
         <button id="btn-create" class="btn primary">建立房間</button>
         <button id="btn-cancel-create" class="btn ghost">取消</button>
       </div>
@@ -128,6 +136,20 @@
         <label class="field inline">上限
           <select id="in-set-max"><option value="2">2</option><option value="4">4</option><option value="6">6</option><option value="8">8</option></select>
         </label>
+        <label class="field inline">電腦
+          <select id="in-set-bots"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option><option value="7">7</option></select>
+        </label>
+        <label class="field inline">難度
+          <select id="in-set-diff"><option value="easy">簡單</option><option value="normal">普通</option><option value="hard">困難</option></select>
+        </label>
+        <label class="field inline">時間
+          <select id="in-set-time"><option value="auto">預設</option><option value="day">白天</option><option value="sunset">黃昏</option><option value="night">夜晚</option></select>
+        </label>
+        <label class="field inline">天氣
+          <select id="in-set-weather"><option value="auto">預設</option><option value="clear">晴朗</option><option value="rain">下雨</option><option value="snow">下雪</option></select>
+        </label>
+        <label class="field inline check"><input type="checkbox" id="in-set-reverse" /> 逆向</label>
+        <label class="field inline check"><input type="checkbox" id="in-set-mirror" /> 鏡像</label>
       </div>
       <div class="row">
         <button id="btn-ready" class="btn primary big">✅ 準備</button>
@@ -159,6 +181,7 @@
       <div id="hud-fx" class="pill fx"></div>
       <div class="hud-actions">
         <button id="btn-standings" class="btn icon" title="排名">📋</button>
+        <button id="btn-cam" class="btn icon" title="鏡頭">🎥</button>
         <button id="btn-mic" class="btn icon" title="語音">🎤</button>
         <button class="btn icon btn-mute" title="音效">🔊</button>
         <button id="btn-chat" class="btn icon" title="聊天">💬</button>
@@ -169,11 +192,19 @@
 
     <div id="hud-standings" class="panel"></div>
     <div id="hud-center"></div>
+    <div id="drift-bar" class="hidden"><i></i></div>
+    <div id="flash"></div>
     <div id="hud-msg"></div>
 
     <div id="hud-help" class="panel help hidden">
       <h3>操作</h3>
-      <p class="small">電腦：← → 轉向、↑ 油門、↓ 煞車 / 倒車、空白鍵使用道具。<br />手機：左下 ◀ ▶ 轉向，右下使用道具與煞車；預設自動油門。</p>
+      <p class="small">電腦：← → 轉向、↑ 油門、↓ 煞車、<b>Shift / X 漂移</b>（轉彎時按住，火花變色後放開加速）、空白鍵道具（按住可拖在車後當盾、放開丟出；按住 ↓ 再丟 = 往後丟）、C 看後方。<br />手機：左下搖桿或 ◀ ▶ 轉向、右下 <b>漂移</b> / 道具 / 往後丟 / 煞車；預設自動油門。</p>
+      <div class="row">
+        <label class="field inline">畫質
+          <select id="sel-quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select>
+        </label>
+        <button id="btn-music" class="btn ghost">音樂：開</button>
+      </div>
       <h3>道具</h3>
       <div id="help-items"></div>
       <h3>車種</h3>
@@ -191,20 +222,28 @@
       <div id="hud-item" class="item-slot" title="使用道具">·</div>
     </div>
     <div id="hud-item-name" class="pill item-name hidden"></div>
-    <div id="hud-keys" class="muted small">← → 轉向 · ↑ 油門 · ↓ 煞車 · 空白鍵 道具</div>
+    <div id="hud-keys" class="muted small">← → 轉向 · ↑ 油門 · ↓ 煞車 · Shift 漂移 · 空白鍵 道具（按住拖曳）· C 看後方</div>
 
     <div id="touch-controls" class="hidden">
-      <div class="tc-group left">
+      <div id="joystick" class="hidden"><div id="joystick-knob"></div></div>
+      <div id="tc-btns" class="tc-group left">
         <button id="tc-left" class="tc">◀</button>
         <button id="tc-right" class="tc">▶</button>
       </div>
       <div class="tc-group right">
+        <button id="tc-back" class="tc small hidden" title="往後丟">↩</button>
         <button id="tc-item" class="tc item">🎁</button>
         <button id="tc-brake" class="tc small">🛑</button>
+        <button id="tc-drift" class="tc drift">漂移</button>
         <button id="tc-gas" class="tc gas">🔥</button>
       </div>
-      <button id="tc-auto" class="btn small">自動油門：開</button>
+      <button id="tc-look" class="tc tiny" title="看後方">👀</button>
+      <div class="tc-top">
+        <button id="tc-mode" class="btn small">🕹️ 搖桿</button>
+        <button id="tc-auto" class="btn small">自動油門：開</button>
+      </div>
     </div>
+    <div id="rotate-hint" class="hidden"><div>📱↻<br />請將手機轉為橫向遊玩<br /><button id="btn-rotate-skip" class="btn small">直向繼續</button></div></div>
 
     <div id="chat-overlay" class="chat-overlay">
       <div id="game-chat-log" class="chat-log"></div>

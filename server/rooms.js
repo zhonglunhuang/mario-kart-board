@@ -61,6 +61,9 @@ class RoomManager {
       maxPlayers: room.maxPlayers,
       laps: room.laps,
       map: room.map,
+      bots: room.bots,
+      difficulty: room.difficulty,
+      variant: { ...room.variant },
       status: room.status,
       voice: [...room.voice],
       players: room.players.map((id) => {
@@ -79,6 +82,7 @@ class RoomManager {
       maxPlayers: r.maxPlayers,
       laps: r.laps,
       map: r.map,
+      bots: r.bots,
       status: r.status,
     }));
   }
@@ -106,6 +110,9 @@ class RoomManager {
       maxPlayers: Math.min(8, Math.max(2, parseInt(opts.maxPlayers, 10) || 4)),
       laps: Math.min(5, Math.max(1, parseInt(opts.laps, 10) || 3)),
       map: DEFS.MAPS[opts.map] ? opts.map : DEFS.DEFAULT_MAP,
+      bots: Math.min(7, Math.max(0, parseInt(opts.bots, 10) || 0)),
+      difficulty: DEFS.DIFFICULTIES.some((d) => d.id === opts.difficulty) ? opts.difficulty : 'normal',
+      variant: { reverse: false, mirror: false, time: 'auto', weather: 'auto' },
       voice: new Set(),
       status: 'waiting',
       players: [],
@@ -162,6 +169,7 @@ class RoomManager {
         room.hostId = room.players[0];
         const host = this.players.get(room.hostId);
         if (host) host.ready = true;
+        if (room.game && !room.game.finished) room.game.setHost(room.hostId);
       }
       this.broadcastRoom(roomId);
     }
@@ -187,6 +195,15 @@ class RoomManager {
     if (opts.maxPlayers) room.maxPlayers = Math.min(8, Math.max(room.players.length, parseInt(opts.maxPlayers, 10) || room.maxPlayers));
     if (opts.name !== undefined) room.name = clean(opts.name, 20) || room.name;
     if (opts.map && DEFS.MAPS[opts.map]) room.map = opts.map;
+    if (opts.bots !== undefined) room.bots = Math.min(7, Math.max(0, parseInt(opts.bots, 10) || 0));
+    if (opts.difficulty && DEFS.DIFFICULTIES.some((d) => d.id === opts.difficulty)) room.difficulty = opts.difficulty;
+    if (opts.variant && typeof opts.variant === 'object') {
+      const v = opts.variant;
+      if (v.reverse !== undefined) room.variant.reverse = !!v.reverse;
+      if (v.mirror !== undefined) room.variant.mirror = !!v.mirror;
+      if (v.time && ['auto', ...DEFS.VARIANTS.time.map((x) => x.id)].includes(v.time)) room.variant.time = v.time;
+      if (v.weather && ['auto', ...DEFS.VARIANTS.weather.map((x) => x.id)].includes(v.weather)) room.variant.weather = v.weather;
+    }
     this.broadcastRoom(room.id);
     this.broadcastList();
     return { ok: true };
@@ -207,10 +224,25 @@ class RoomManager {
       const q = this.players.get(id);
       return { id, name: q.name, character: q.character, kart: q.kart };
     });
+    const used = new Set(roster.map((q) => q.name));
+    const names = DEFS.BOT_NAMES.filter((n) => !used.has(n));
+    const botCount = Math.min(room.bots, Math.max(0, 8 - roster.length));
+    for (let i = 0; i < botCount; i++) {
+      roster.push({
+        id: `bot-${room.id}-${i + 1}`,
+        name: names[i % names.length] || `AI${i + 1}`,
+        character: DEFS.CHARACTERS[Math.floor(Math.random() * DEFS.CHARACTERS.length)].id,
+        kart: DEFS.KARTS[Math.floor(Math.random() * DEFS.KARTS.length)].id,
+        bot: true,
+      });
+    }
     room.status = 'playing';
     room.game = new Race(roster, {
       laps: room.laps,
       map: room.map,
+      variant: room.variant,
+      difficulty: room.difficulty,
+      hostId: room.hostId,
       emit: (event, payload) => this.io.to(room.id).emit(event, payload),
       onOver: () => this.endGame(room),
     });
@@ -226,13 +258,15 @@ class RoomManager {
     if (!room || !room.game) return { error: '遊戲尚未開始' };
     const race = room.game;
     switch (action) {
-      case 'state':
+      case 'state': {
         race.updateState(socketId, payload || {});
+        if (Array.isArray(payload?.bots)) for (const b of payload.bots.slice(0, 7)) race.updateState(socketId, b, String(b.id || ''));
         return null;
+      }
       case 'pickup':
-        return race.pickup(socketId, payload?.box);
+        return race.pickup(socketId, payload?.box, payload?.as);
       case 'use':
-        return race.useItem(socketId, payload || {});
+        return race.useItem(socketId, payload || {}, payload?.as);
       case 'hit':
         return race.hit(socketId, payload || {});
       default:

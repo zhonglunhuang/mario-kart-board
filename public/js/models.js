@@ -14,8 +14,8 @@ const VEHICLES = {
   bike: { file: 'race-future', length: 3.6, seat: [0, 0.32, -0.2] },
   monster: { file: 'tractor', length: 3.8, seat: [0, 0.78, -0.15] },
 };
-const NATURE = ['tree_default', 'tree_detailed', 'tree_oak', 'tree_pineDefaultA', 'tree_pineRoundA', 'tree_palm', 'tree_palmDetailedShort', 'tree_pineTallA', 'tree_pineSmallA', 'tree_cone', 'rock_largeA', 'rock_largeB', 'rock_smallA', 'rock_tallA', 'rock_tallB', 'flower_redA', 'flower_yellowA', 'flower_purpleA', 'mushroom_red', 'mushroom_tan', 'grass_large'];
-const RACING = ['overhead', 'barrierRed', 'barrierWhite', 'flagCheckers', 'grandStand', 'grandStandCovered', 'tent', 'lightPostModern', 'billboard', 'pylon'];
+const NATURE = ['tree_default', 'tree_detailed', 'tree_oak', 'tree_pineDefaultA', 'tree_pineRoundA', 'tree_palm', 'tree_palmDetailedShort', 'tree_pineTallA', 'tree_pineSmallA', 'tree_cone', 'tree_thin', 'rock_largeA', 'rock_largeB', 'rock_smallA', 'rock_tallA', 'rock_tallB', 'flower_redA', 'flower_yellowA', 'flower_purpleA', 'mushroom_red', 'mushroom_tan', 'grass_large'];
+const RACING = ['overhead', 'barrierRed', 'barrierWhite', 'flagCheckers', 'grandStand', 'grandStandCovered', 'tent', 'tentClosed', 'lightPostModern', 'lightPostLarge', 'billboard', 'pylon', 'ramp', 'pitsGarage', 'pitsOffice', 'pitsGarageClosed'];
 
 export const assets = { vehicles: {}, characters: {}, nature: {}, racing: {}, ready: false };
 const texCache = new Map();
@@ -216,16 +216,175 @@ export function buildKart(ch, kartDef) {
     person.scale.setScalar(s);
     person.position.set(v.seat.x * v.scale, v.seat.y * v.scale + vehicle.position.y - 0.02, v.seat.z * v.scale);
     const mixer = new THREE.AnimationMixer(person);
-    const clip = c.clips.find((a) => a.name === 'drive') || c.clips.find((a) => a.name === 'sit') || c.clips[0];
-    if (clip) {
-      const action = mixer.clipAction(clip);
-      action.play();
-      mixer.update(Math.random() * 2);
+    const actions = {};
+    for (const name of ['drive', 'sit', 'jump', 'die', 'emote-yes', 'emote-no', 'fall']) {
+      const clip = c.clips.find((a) => a.name === name);
+      if (clip) actions[name] = mixer.clipAction(clip);
+    }
+    const base = actions.drive || actions.sit || mixer.clipAction(c.clips[0]);
+    base.play();
+    mixer.update(Math.random() * 2);
+    // 帽子 / 專屬配件掛在頭部骨骼上
+    const head = person.getObjectByName('head');
+    if (head) {
+      const hat = buildHat(ch, c.height);
+      if (hat) head.add(hat);
     }
     group.add(person);
     group.userData.mixer = mixer;
+    group.userData.actions = actions;
+    group.userData.baseAction = base;
+    group.userData.current = base;
+    group.userData.person = person;
   }
+  // 車頭燈（夜晚用）
+  const lampMat = new THREE.MeshStandardMaterial({ color: '#fff7c0', emissive: '#fff2a0', emissiveIntensity: 0 });
+  const lampGeo = geo('lamp', () => new THREE.SphereGeometry(0.16, 8, 8));
+  const lamps = [];
+  for (const sx of [-0.55, 0.55]) {
+    const l = new THREE.Mesh(lampGeo, lampMat);
+    l.position.set(sx, 0.55, 1.6);
+    group.add(l);
+    lamps.push(l);
+  }
+  group.userData.lampMat = lampMat;
+  group.userData.lamps = lamps;
   return group;
+}
+
+/** 依角色定義建立帽子（尺寸以角色模型高度為基準，掛在頭骨上） */
+function buildHat(ch, height) {
+  const H = height * 0.36; // 頭的大約半徑
+  const g = new THREE.Group();
+  const hatMat = mat(ch.hatColor || ch.color);
+  switch (ch.hat) {
+    case 'cap': {
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(H * 1.02, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), hatMat);
+      cap.position.y = H * 0.55;
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(H * 0.9, H * 0.9, H * 0.12, 14), hatMat);
+      brim.scale.set(1, 1, 1.5);
+      brim.position.set(0, H * 0.6, H * 0.55);
+      g.add(cap, brim);
+      if (ch.letter) {
+        const c = document.createElement('canvas');
+        c.width = c.height = 64;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(32, 32, 30, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = ch.hatColor || ch.color;
+        ctx.font = 'bold 40px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(ch.letter, 32, 34);
+        const tex = new THREE.CanvasTexture(c);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const badge = new THREE.Mesh(new THREE.CircleGeometry(H * 0.32, 16), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+        badge.position.set(0, H * 1.05, H * 0.86);
+        badge.rotation.x = -0.35;
+        g.add(badge);
+      }
+      break;
+    }
+    case 'crown': {
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(H * 0.55, H * 0.5, H * 0.4, 8), hatMat);
+      crown.position.y = H * 1.25;
+      g.add(crown);
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        const spike = new THREE.Mesh(new THREE.ConeGeometry(H * 0.13, H * 0.35, 5), hatMat);
+        spike.position.set(Math.cos(a) * H * 0.48, H * 1.6, Math.sin(a) * H * 0.48);
+        g.add(spike);
+      }
+      const gem = new THREE.Mesh(new THREE.SphereGeometry(H * 0.12, 8, 8), mat('#e53935', { emissive: '#e53935', emissiveIntensity: 0.4 }));
+      gem.position.set(0, H * 1.3, H * 0.52);
+      g.add(gem);
+      break;
+    }
+    case 'mushroom': {
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(H * 1.35, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), hatMat);
+      cap.position.y = H * 0.35;
+      g.add(cap);
+      const spot = mat(ch.spots || '#e52521');
+      [[0, 1.2, 0.5], [0.85, 0.75, 0.8], [-0.85, 0.75, 0.8], [0, 0.9, -1.1], [1.0, 0.6, -0.6], [-1.0, 0.6, -0.6]].forEach(([x, y, z]) => {
+        const sp = new THREE.Mesh(new THREE.SphereGeometry(H * 0.32, 8, 8), spot);
+        sp.position.set(x * H, y * H + H * 0.35, z * H);
+        g.add(sp);
+      });
+      break;
+    }
+    case 'spikes': {
+      for (let i = -1; i <= 1; i++) {
+        const spike = new THREE.Mesh(new THREE.ConeGeometry(H * 0.22, H * 0.9, 6), hatMat);
+        spike.position.set(i * H * 0.42, H * 1.35, -H * 0.1);
+        spike.rotation.x = -0.2;
+        g.add(spike);
+      }
+      const brow = mat('#222');
+      for (const sx of [-1, 1]) {
+        const b = new THREE.Mesh(new THREE.BoxGeometry(H * 0.45, H * 0.1, H * 0.1), brow);
+        b.position.set(sx * H * 0.38, H * 0.55, H * 0.95);
+        b.rotation.z = sx * -0.35;
+        g.add(b);
+      }
+      break;
+    }
+    case 'crest': {
+      const crest = new THREE.Mesh(new THREE.ConeGeometry(H * 0.25, H * 0.7, 6), hatMat);
+      crest.position.set(0, H * 1.3, -H * 0.2);
+      crest.rotation.x = -0.5;
+      g.add(crest);
+      const nose = new THREE.Mesh(new THREE.SphereGeometry(H * 0.45, 12, 10), mat(ch.color));
+      nose.position.set(0, H * 0.15, H * 1.05);
+      g.add(nose);
+      break;
+    }
+    case 'tie': {
+      const tie = new THREE.Mesh(new THREE.BoxGeometry(H * 0.4, H * 0.9, H * 0.12), hatMat);
+      tie.position.set(0, -H * 1.3, H * 0.9);
+      g.add(tie);
+      const tuft = new THREE.Mesh(new THREE.ConeGeometry(H * 0.18, H * 0.5, 6), mat('#5a2d0c'));
+      tuft.position.set(0, H * 1.25, 0);
+      g.add(tuft);
+      break;
+    }
+    default:
+      return null;
+  }
+  g.traverse((o) => {
+    if (o.isMesh) o.castShadow = true;
+  });
+  return g;
+}
+
+/** 切換角色動作（'hit' | 'jump' | 'win' | 'lose' | 'drive'） */
+export function playAnim(group, name, { once = false, fade = 0.15 } = {}) {
+  const u = group.userData;
+  if (!u.actions) return;
+  const map = { hit: 'die', jump: 'jump', win: 'emote-yes', lose: 'emote-no', drive: null };
+  const clipName = map[name] === undefined ? name : map[name];
+  const target = clipName ? u.actions[clipName] : u.baseAction;
+  if (!target || target === u.current) return;
+  target.reset();
+  target.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
+  target.clampWhenFinished = once;
+  target.enabled = true;
+  target.play();
+  u.current.crossFadeTo(target, fade, false);
+  u.current = target;
+  if (once) {
+    const onDone = (e) => {
+      if (e.action !== target) return;
+      u.mixer.removeEventListener('finished', onDone);
+      if (u.current === target) playAnim(group, 'drive');
+    };
+    u.mixer.addEventListener('finished', onDone);
+  }
+}
+
+export function setHeadlights(group, on) {
+  if (group.userData.lampMat) group.userData.lampMat.emissiveIntensity = on ? 2.5 : 0;
 }
 
 /* ---------- 道具 / 場景物件 ---------- */
@@ -316,10 +475,24 @@ export function buildItemBox() {
   return g;
 }
 
+/** 炸彈 */
+export function buildBomb() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(geo('bomb', () => new THREE.SphereGeometry(0.75, 14, 12)), mat('#222', { roughness: 0.4, metalness: 0.3 }));
+  const fuse = new THREE.Mesh(geo('fuse', () => new THREE.CylinderGeometry(0.08, 0.08, 0.5, 6)), mat('#888'));
+  fuse.position.y = 0.9;
+  const spark = new THREE.Mesh(geo('spark', () => new THREE.SphereGeometry(0.14, 6, 6)), mat('#ffb300', { emissive: '#ff8f00', emissiveIntensity: 2 }));
+  spark.position.y = 1.2;
+  body.castShadow = true;
+  g.add(body, fuse, spark);
+  return g;
+}
+
 /** 龜殼 */
 export function buildShell(kind) {
+  if (kind === 'bomb') return buildBomb();
   const g = new THREE.Group();
-  const color = kind === 'red' ? '#e52521' : '#2ecc40';
+  const color = kind === 'red' ? '#e52521' : kind === 'blue' ? '#2979ff' : '#2ecc40';
   const shell = new THREE.Mesh(geo('shell', () => new THREE.SphereGeometry(0.85, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2)), mat(color, { roughness: 0.35 }));
   const rim = new THREE.Mesh(geo('shellrim', () => new THREE.CylinderGeometry(0.9, 0.8, 0.28, 14)), mat('#fff3c4'));
   rim.position.y = -0.1;
@@ -328,5 +501,13 @@ export function buildShell(kind) {
   rimTop.position.y = 0.55;
   shell.castShadow = true;
   g.add(shell, rim, rimTop);
+  if (kind === 'blue') {
+    for (const sx of [-1, 1]) {
+      const wing = new THREE.Mesh(geo('wing', () => new THREE.BoxGeometry(0.9, 0.08, 0.5)), mat('#ffffff'));
+      wing.position.set(sx * 1.0, 0.3, 0);
+      wing.rotation.z = sx * 0.4;
+      g.add(wing);
+    }
+  }
   return g;
 }

@@ -203,7 +203,7 @@ $('#btn-open-create').onclick = () => {
 };
 $('#btn-cancel-create').onclick = () => $('#dlg-create').classList.add('hidden');
 $('#btn-create').onclick = async () => {
-  const res = await emit('room:create', { name: $('#in-room-name').value, laps: $('#in-room-laps').value, maxPlayers: $('#in-room-max').value, map: state.createMap });
+  const res = await emit('room:create', { name: $('#in-room-name').value, laps: $('#in-room-laps').value, maxPlayers: $('#in-room-max').value, map: state.createMap, bots: $('#in-room-bots').value, difficulty: $('#in-room-diff').value });
   if (res?.error) return toast(res.error);
   $('#dlg-create').classList.add('hidden');
   enterRoom(res.room);
@@ -222,7 +222,9 @@ function renderRoom() {
   if (!r) return;
   const isHost = r.hostId === state.me.id;
   $('#room-title').textContent = r.name;
-  $('#room-meta').textContent = `${mapLabel(r.map)} · ${r.laps} 圈 · ${r.players.length}/${r.maxPlayers} 人 · 房號 ${r.id}`;
+  const v = r.variant || {};
+  const vtxt = [v.reverse ? '逆向' : '', v.mirror ? '鏡像' : '', v.time && v.time !== 'auto' ? DEFS.VARIANTS.time.find((x) => x.id === v.time)?.name : '', v.weather && v.weather !== 'auto' ? DEFS.VARIANTS.weather.find((x) => x.id === v.weather)?.name : ''].filter(Boolean).join(' ');
+  $('#room-meta').textContent = `${mapLabel(r.map)}${vtxt ? ' (' + vtxt + ')' : ''} · ${r.laps} 圈 · ${r.players.length}/${r.maxPlayers} 人 · 🤖${r.bots ?? 0}（${DEFS.DIFFICULTIES.find((d) => d.id === r.difficulty)?.name || '普通'}）· 房號 ${r.id}`;
   const voiceSet = new Set(r.voice || []);
   const list = $('#room-players');
   list.innerHTML = '';
@@ -244,6 +246,12 @@ function renderRoom() {
   $('#in-set-laps').value = String(r.laps);
   $('#in-set-max').value = String(r.maxPlayers);
   $('#in-set-map').value = r.map || DEFS.DEFAULT_MAP;
+  $('#in-set-bots').value = String(r.bots ?? 0);
+  $('#in-set-diff').value = r.difficulty || 'normal';
+  $('#in-set-time').value = v.time || 'auto';
+  $('#in-set-weather').value = v.weather || 'auto';
+  $('#in-set-reverse').checked = !!v.reverse;
+  $('#in-set-mirror').checked = !!v.mirror;
   renderVoiceUI();
   $('#btn-ready').classList.toggle('hidden', isHost);
   $('#btn-ready').textContent = me?.ready ? '取消準備' : '✅ 準備';
@@ -277,6 +285,12 @@ $('#btn-start').onclick = async () => {
 $('#in-set-laps').onchange = (e) => socket.emit('room:settings', { laps: e.target.value }, (r) => r?.error && toast(r.error));
 $('#in-set-max').onchange = (e) => socket.emit('room:settings', { maxPlayers: e.target.value }, (r) => r?.error && toast(r.error));
 $('#in-set-map').onchange = (e) => socket.emit('room:settings', { map: e.target.value }, (r) => r?.error && toast(r.error));
+$('#in-set-bots').onchange = (e) => socket.emit('room:settings', { bots: e.target.value }, (r) => r?.error && toast(r.error));
+$('#in-set-diff').onchange = (e) => socket.emit('room:settings', { difficulty: e.target.value }, (r) => r?.error && toast(r.error));
+$('#in-set-time').onchange = (e) => socket.emit('room:settings', { variant: { time: e.target.value } }, (r) => r?.error && toast(r.error));
+$('#in-set-weather').onchange = (e) => socket.emit('room:settings', { variant: { weather: e.target.value } }, (r) => r?.error && toast(r.error));
+$('#in-set-reverse').onchange = (e) => socket.emit('room:settings', { variant: { reverse: e.target.checked } }, (r) => r?.error && toast(r.error));
+$('#in-set-mirror').onchange = (e) => socket.emit('room:settings', { variant: { mirror: e.target.checked } }, (r) => r?.error && toast(r.error));
 $('#btn-leave-room').onclick = async () => {
   state.voice?.leave();
   await emit('room:leave');
@@ -343,18 +357,29 @@ function preloadAssets() {
   });
 }
 let scenePromise = null;
-let scenePromiseMap = null;
-function ensureScene(mapId = DEFS.DEFAULT_MAP) {
-  if (scenePromise && scenePromiseMap === mapId) return scenePromise;
+let scenePromiseKey = null;
+function getQuality() {
+  try {
+    const q = localStorage.getItem('mkb-quality');
+    if (q) return q;
+  } catch (e) {
+    /* ignore */
+  }
+  return state.isMobile || state.isTouch ? 'medium' : 'high';
+}
+function ensureScene(mapId = DEFS.DEFAULT_MAP, variant = {}) {
+  const quality = getQuality();
+  const key = JSON.stringify([mapId, variant, quality]);
+  if (scenePromise && scenePromiseKey === key) return scenePromise;
   if (!assets.ready) $('#asset-progress').classList.remove('hidden');
-  scenePromiseMap = mapId;
+  scenePromiseKey = key;
   scenePromise = preloadAssets()
     .then(() => {
       if (state.scene) {
         state.scene.dispose();
         state.scene = null;
       }
-      return RaceScene.create($('#gl'), { mobile: state.isMobile, map: mapId });
+      return RaceScene.create($('#gl'), { mobile: state.isMobile, map: mapId, variant, quality });
     })
     .then((scene) => {
       state.scene = scene;
@@ -375,18 +400,23 @@ async function startGame(payload) {
   $('#hud-help').classList.add('hidden');
   $('#chat-overlay').classList.toggle('open', !state.isTouch && !state.isMobile);
   const mapId = payload.state.map || payload.room.map || DEFS.DEFAULT_MAP;
-  if (!state.scene || state.scene.mapId !== mapId) $('#dlg-loading').classList.remove('hidden');
-  const scene = await ensureScene(mapId);
+  const variant = payload.state.variant || payload.room.variant || {};
+  $('#dlg-loading').classList.remove('hidden');
+  const scene = await ensureScene(mapId, variant);
   $('#dlg-loading').classList.add('hidden');
   if (state.race) state.race.destroy();
   showScreen('screen-game');
   scene.resize();
   audio.unlock();
   audio.engineStart();
-  state.race = new RaceController({ scene, socket, meId: state.me.id, state: payload.state, room: payload.room, isTouch: state.isTouch, audio });
+  let joystick = true;
+  try { joystick = localStorage.getItem('mkb-joystick') !== '0'; } catch (e) { /* ignore */ }
+  state.race = new RaceController({ scene, socket, meId: state.me.id, state: payload.state, room: payload.room, isTouch: state.isTouch, audio, prefs: { joystick } });
   renderVoiceUI();
-  if (document.documentElement.requestFullscreen && state.isTouch) {
-    document.documentElement.requestFullscreen().catch(() => {});
+  if (state.isTouch) {
+    if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+    try { screen.orientation?.lock?.('landscape').catch(() => {}); } catch (e) { /* iOS 不支援 */ }
+    checkOrientation();
   }
 }
 socket.on('game:start', startGame);
@@ -411,8 +441,22 @@ function showResult(payload) {
   state.room = payload.room;
   $('#dlg-result').classList.remove('hidden');
 }
+let rotateSkipped = false;
+function checkOrientation() {
+  const hint = $('#rotate-hint');
+  const portrait = window.innerHeight > window.innerWidth;
+  hint.classList.toggle('hidden', !(state.race && state.isTouch && portrait && !rotateSkipped));
+}
+window.addEventListener('resize', checkOrientation);
+$('#btn-rotate-skip').onclick = () => {
+  rotateSkipped = true;
+  checkOrientation();
+};
 function leaveRaceView() {
   $('#dlg-result').classList.add('hidden');
+  try { screen.orientation?.unlock?.(); } catch (e) { /* ignore */ }
+  $('#rotate-hint').classList.add('hidden');
+  audio.music('lobby');
   if (state.race) {
     state.race.destroy();
     state.race = null;
@@ -450,12 +494,23 @@ for (const b of document.querySelectorAll('.btn-mute')) {
     renderAudioUI();
   };
 }
+$('#sel-quality').value = getQuality();
+$('#sel-quality').onchange = (e) => {
+  try { localStorage.setItem('mkb-quality', e.target.value); } catch (err) { /* ignore */ }
+  toast('畫質設定會在下一場比賽生效');
+};
+$('#btn-music').onclick = () => {
+  audio.unlock();
+  audio.setMusic(!audio.musicOn);
+  $('#btn-music').textContent = `音樂：${audio.musicOn ? '開' : '關'}`;
+};
+$('#btn-music').textContent = `音樂：${audio.musicOn ? '開' : '關'}`;
 $('#btn-announcer').onclick = () => {
   audio.setVoice(!audio.voiceOn);
   renderAudioUI();
   if (audio.voiceOn) audio.say('播報已開啟');
 };
-document.addEventListener('pointerdown', () => audio.unlock(), { once: true });
+document.addEventListener('pointerdown', () => { audio.unlock(); if (!state.race) audio.music('lobby'); }, { once: true });
 
 state.voice = new VoiceChat(socket, { onState: () => renderVoiceUI() });
 function renderVoiceUI() {
