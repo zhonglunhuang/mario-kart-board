@@ -123,7 +123,7 @@ export class RaceScene {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = this.night ? 0.9 : 1.05;
+    this.renderer.toneMappingExposure = this.night ? 1.05 : 1.05;
 
     const th = this.theme;
     this.scene = new THREE.Scene();
@@ -138,7 +138,7 @@ export class RaceScene {
     this.shake = 0;
     this.camMode = 'chase'; // chase | reverse | orbit
 
-    this.scene.add(new THREE.HemisphereLight(this.night ? '#3a4a8a' : '#ffffff', th.ground, this.night ? 0.55 : 1.0));
+    this.scene.add(new THREE.HemisphereLight(this.night ? '#5d6fb8' : '#ffffff', th.ground, this.night ? 0.85 : 1.0));
     this.sun = new THREE.DirectionalLight(th.sun, th.sunIntensity);
     this.sun.position.set(60, 120, 40);
     this.sun.castShadow = this.quality >= 1;
@@ -148,7 +148,7 @@ export class RaceScene {
     this.sun.shadow.bias = -0.0006;
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
-    this.headlight = new THREE.SpotLight('#fff3c4', this.night ? 60 : 0, 45, 0.5, 0.5, 1.2);
+    this.headlight = new THREE.SpotLight('#fff3c4', this.night ? 140 : 0, 60, 0.55, 0.5, 1.1);
     this.scene.add(this.headlight, this.headlight.target);
 
     this.karts = new Map();
@@ -183,7 +183,7 @@ export class RaceScene {
       th.ground = mix(th.ground, '#0d1320', 0.6).getStyle();
       th.groundNoise = mix(th.groundNoise, '#000', 0.6).getStyle();
       th.hills = mix(th.hills, '#0c1428', 0.7).getStyle();
-      th.sun = '#9fb4ff'; th.sunIntensity = 0.5;
+      th.sun = '#9fb4ff'; th.sunIntensity = 0.8;
     } else if (time === 'sunset' && this.map.theme.time !== 'sunset') {
       th.sky = mix(th.sky, '#ff9a5c', 0.55).getStyle();
       th.fog = mix(th.fog, '#ffb489', 0.5).getStyle();
@@ -496,8 +496,8 @@ export class RaceScene {
         const p = T.side(t, side * (HALF + 2.2), 8.4);
         bulb.position.set(p.x, p.y, p.z);
         this.scene.add(bulb);
-        if (i % 2 === 0 && this.quality >= 1) {
-          const light = new THREE.PointLight('#ffe9b0', 35, 40, 1.6);
+        if (this.quality >= 1) {
+          const light = new THREE.PointLight('#ffe9b0', 60, 48, 1.5);
           light.position.set(p.x, p.y - 1, p.z);
           this.scene.add(light);
           this.lampLights.push(light);

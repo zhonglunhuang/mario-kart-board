@@ -70,7 +70,7 @@
         sky: '#0b1530', fog: '#141f45', fogNear: 120, fogFar: 380,
         ground: '#2b2f3a', groundNoise: '#171a22', hills: '#1c2340', road: '#33353d', dust: '#8a8f9c',
         trees: ['tree_cone', 'tree_thin'], rocks: ['rock_largeB'], flowers: [], extras: ['rock_smallA'], grass: null,
-        sun: '#9fb4ff', sunIntensity: 0.5, time: 'night', city: true,
+        sun: '#9fb4ff', sunIntensity: 0.8, time: 'night', city: true,
       },
     },
     beach: {

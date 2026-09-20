@@ -329,3 +329,8 @@ select option { color: #000; }
   .tc.drift { width: 72px; height: 72px; font-size: 16px; }
   #drift-bar { bottom: calc(126px + var(--safe-bottom)); width: 120px; }
 }
+/* 觸控裝置：小地圖與速度往上移，避開搖桿 */
+@media (pointer: coarse) {
+  #hud-left { bottom: calc(160px + var(--safe-bottom)); }
+  #minimap { width: 110px; height: 110px; }
+}
