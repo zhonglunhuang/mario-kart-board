@@ -29,6 +29,7 @@ export class Particles {
     this.grav = new Float32Array(max);
     this.startSize = new Float32Array(max);
     this.alive = 0;
+    this.scale = 1; // 由場景依畫質設定
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(this.col, 3));
@@ -50,7 +51,10 @@ export class Particles {
   }
 
   emit(x, y, z, { count = 1, color = '#ffffff', size = 0.6, life = 0.6, speed = 2, spread = 1, dir = null, gravity = 0, sizeVar = 0.4 } = {}) {
-    for (let n = 0; n < count; n++) {
+    let n0 = count * this.scale;
+    if (n0 < 1 && Math.random() > n0) return;
+    const total = Math.max(1, Math.round(n0));
+    for (let n = 0; n < total; n++) {
       if (this.alive >= this.max) return;
       const i = this.alive++;
       const c = this.tmpColor.set(color);

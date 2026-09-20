@@ -92,7 +92,7 @@ export class KartPhysics {
       // ---- 漂移 ----
       const D = this.DRIFT;
       const steerIn = controllable ? input.steer : 0;
-      if (!this.drift.active && controllable && input.drift && !this.air && this.speed > D.minSpeed && Math.abs(steerIn) > 0.25) {
+      if (!this.drift.active && controllable && input.drift && !this.air && this.speed > D.minSpeed && Math.abs(steerIn) > 0.15) {
         this.drift = { active: true, dir: Math.sign(steerIn), charge: 0, level: 0 };
         this.vy = 3.2;
         this.air = true;
@@ -105,8 +105,9 @@ export class KartPhysics {
         else {
           const inward = Math.max(0, steerIn * this.drift.dir); // 往漂移方向推桿：收緊
           const outward = Math.max(0, -steerIn * this.drift.dir); // 反推：放寬
-          const yawRate = K.turn * K.drift * this.drift.dir * (0.45 + 0.5 * inward - 0.3 * outward) * grip;
-          this.rot += yawRate * dt;
+          // steer 正值 = 右轉 = yaw 減少（與一般轉向同號）
+          const yawRate = K.turn * K.drift * this.drift.dir * (0.38 + 0.42 * inward - 0.22 * outward) * grip;
+          this.rot -= yawRate * dt;
           this.drift.charge += dt * (0.7 + 0.6 * inward + 0.15 * outward) * (K.driftCharge || 1);
           let lvl = 0;
           for (const L of D.levels) if (this.drift.charge >= L) lvl++;
@@ -121,7 +122,9 @@ export class KartPhysics {
       }
       if (!this.drift.active) {
         this.steer = damp(this.steer, steerIn, 14, dt);
-        const g = Math.min(1, Math.abs(this.speed) / 9) * grip;
+        // 高速時一般轉向會轉向不足（最多剩 65%），要維持緊的路線就得漂移
+        const under = 1 - 0.35 * Math.min(1, Math.abs(this.speed) / K.maxSpeed);
+        const g = Math.min(1, Math.abs(this.speed) / 9) * grip * under;
         this.rot -= K.turn * this.steer * g * dt * (this.speed < 0 ? -1 : 1);
       }
     }

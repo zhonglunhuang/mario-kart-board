@@ -5,6 +5,7 @@ const express = require('express');
 const { Server } = require('socket.io');
 const crypto = require('crypto');
 const { RoomManager } = require('./rooms.js');
+const log = require('./log.js');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 const TURN_SECONDS = parseInt(process.env.TURN_SECONDS, 10) || 45;
@@ -47,7 +48,11 @@ router.use(
     },
   }),
 );
-router.get('/healthz', (req, res) => res.json({ ok: true, rooms: manager.rooms.size, players: manager.players.size }));
+router.get('/healthz', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const playing = [...manager.rooms.values()].filter((r) => r.game && !r.game.finished).length;
+  res.json({ ok: true, version: APP_VERSION, uptimeSec: Math.round(process.uptime()), rooms: manager.rooms.size, playing, players: manager.players.size });
+});
 
 router.get('/config', (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -83,47 +88,106 @@ const server = http.createServer(app);
 const io = new Server(server, {
   path: SIO_PATH,
   pingInterval: 10000,
-  pingTimeout: 20000,
+  pingTimeout: 30000, // 手機切到背景 / 旋轉時暫停 JS，給多一點寬限
   maxHttpBufferSize: 1e5,
 });
 const manager = new RoomManager(io, { turnSeconds: TURN_SECONDS });
 
+// 房間狀態跨重啟保存
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const ROOMS_FILE = path.join(DATA_DIR, 'rooms.json');
+try {
+  if (fs.existsSync(ROOMS_FILE)) {
+    manager.restore(JSON.parse(fs.readFileSync(ROOMS_FILE, 'utf8')));
+    fs.unlinkSync(ROOMS_FILE);
+  }
+} catch (e) {
+  log.warn('restore rooms failed', { error: e.message });
+}
+function saveRooms() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(ROOMS_FILE, JSON.stringify(manager.dump()));
+  } catch (e) {
+    log.warn('save rooms failed', { error: e.message });
+  }
+}
+
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const playing = [...manager.rooms.values()].filter((r) => r.game && !r.game.finished).length;
+  log.warn('shutdown requested', { signal, players: manager.players.size, rooms: manager.rooms.size, playing });
+  saveRooms();
+  io.emit('server:restart', { seconds: 3 });
+  setTimeout(() => {
+    io.close();
+    server.close();
+    process.exit(0);
+  }, 700);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('uncaughtException', (e) => log.error('uncaughtException', { error: e.stack || String(e) }));
+process.on('unhandledRejection', (e) => log.error('unhandledRejection', { error: e?.stack || String(e) }));
+
 io.on('connection', (socket) => {
   const reply = (cb, data) => typeof cb === 'function' && cb(data);
+  const ip = (socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || '').split(',')[0].trim();
+  const ua = String(socket.handshake.headers['user-agent'] || '').slice(0, 80);
+  const connectedAt = Date.now();
+  log.info('connect', { id: socket.id, ip, transport: socket.conn.transport.name, ua });
+  socket.conn.on('upgrade', (t) => log.info('transport upgrade', { id: socket.id, transport: t.name }));
+  // 每個事件處理都包起來，任何例外只記錄不讓程序崩潰
+  const on = (event, handler) =>
+    socket.on(event, (...args) => {
+      try {
+        handler(...args);
+      } catch (e) {
+        log.error(`handler error: ${event}`, { id: socket.id, error: e.stack || String(e) });
+        const cb = args.find((a) => typeof a === 'function');
+        if (cb) cb({ error: '伺服器處理錯誤' });
+      }
+    });
+  socket.on('client:log', (entry) => {
+    const p = manager.players.get(socket.id);
+    log.info('client log', { id: socket.id, name: p?.name, ...(entry && typeof entry === 'object' ? { msg: String(entry.msg || '').slice(0, 200), data: entry.data } : {}) });
+  });
 
-  socket.on('join', (profile = {}, cb) => {
+  on('join', (profile = {}, cb) => {
     const p = manager.addPlayer(socket, profile);
     reply(cb, { ok: true, playerId: p.id, profile: { name: p.name, character: p.character, kart: p.kart } });
     socket.emit('rooms', manager.roomList());
   });
 
-  socket.on('profile:update', (profile = {}, cb) => {
+  on('profile:update', (profile = {}, cb) => {
     const p = manager.updateProfile(socket.id, profile);
     reply(cb, p ? { ok: true, profile: { name: p.name, character: p.character, kart: p.kart } } : { error: '請先加入' });
   });
 
-  socket.on('rooms:list', (cb) => reply(cb, manager.roomList()));
-  socket.on('room:create', (opts = {}, cb) => reply(cb, manager.createRoom(socket.id, opts)));
-  socket.on('room:join', (roomId, cb) => reply(cb, manager.joinRoom(socket.id, String(roomId || ''))));
-  socket.on('room:leave', (cb) => {
+  on('rooms:list', (cb) => reply(cb, manager.roomList()));
+  on('room:create', (opts = {}, cb) => reply(cb, manager.createRoom(socket.id, opts)));
+  on('room:join', (roomId, cb) => reply(cb, manager.joinRoom(socket.id, String(roomId || ''))));
+  on('room:leave', (cb) => {
     manager.leaveRoom(socket.id);
     reply(cb, { ok: true });
   });
-  socket.on('room:ready', (ready) => manager.setReady(socket.id, ready));
-  socket.on('room:settings', (opts = {}, cb) => reply(cb, manager.updateSettings(socket.id, opts)));
-  socket.on('room:start', (cb) => reply(cb, manager.startGame(socket.id)));
+  on('room:ready', (ready) => manager.setReady(socket.id, ready));
+  on('room:settings', (opts = {}, cb) => reply(cb, manager.updateSettings(socket.id, opts)));
+  on('room:start', (cb) => reply(cb, manager.startGame(socket.id)));
   // 競速：位置回報（高頻、不回覆）、撿道具箱、使用道具、命中回報
-  socket.on('race:state', (payload) => manager.raceAction(socket.id, 'state', payload));
-  socket.on('race:pickup', (payload, cb) => reply(cb, manager.raceAction(socket.id, 'pickup', payload)));
-  socket.on('race:use', (payload, cb) => reply(cb, manager.raceAction(socket.id, 'use', payload)));
-  socket.on('race:hit', (payload, cb) => reply(cb, manager.raceAction(socket.id, 'hit', payload)));
-  socket.on('game:sync', (cb) => reply(cb, manager.getState(socket.id)));
+  on('race:state', (payload) => manager.raceAction(socket.id, 'state', payload));
+  on('race:pickup', (payload, cb) => reply(cb, manager.raceAction(socket.id, 'pickup', payload)));
+  on('race:use', (payload, cb) => reply(cb, manager.raceAction(socket.id, 'use', payload)));
+  on('race:hit', (payload, cb) => reply(cb, manager.raceAction(socket.id, 'hit', payload)));
+  on('game:sync', (cb) => reply(cb, manager.getState(socket.id)));
   // 語音對話訊號交換
-  socket.on('voice:join', (cb) => reply(cb, manager.voiceJoin(socket.id)));
-  socket.on('voice:leave', () => manager.voiceLeave(socket.id));
-  socket.on('voice:signal', (payload) => manager.voiceSignal(socket.id, payload));
+  on('voice:join', (cb) => reply(cb, manager.voiceJoin(socket.id)));
+  on('voice:leave', () => manager.voiceLeave(socket.id));
+  on('voice:signal', (payload) => manager.voiceSignal(socket.id, payload));
 
-  socket.on('chat', (text) => {
+  on('chat', (text) => {
     const p = manager.players.get(socket.id);
     if (!p || !p.roomId) return;
     const msg = String(text || '')
@@ -134,9 +198,14 @@ io.on('connection', (socket) => {
     io.to(p.roomId).emit('chat', { from: p.name, playerId: p.id, text: msg, at: Date.now() });
   });
 
-  socket.on('disconnect', () => manager.removePlayer(socket.id));
+  socket.on('disconnect', (reason) => {
+    const p = manager.players.get(socket.id);
+    const room = p?.roomId ? manager.rooms.get(p.roomId) : null;
+    log.info('disconnect', { id: socket.id, name: p?.name, reason, room: p?.roomId || null, racing: !!(room?.game && !room.game.finished), connectedSec: Math.round((Date.now() - connectedAt) / 1000) });
+    manager.removePlayer(socket.id);
+  });
 });
 
 server.listen(PORT, () => {
-  console.log(`Mario Kart Board server v${APP_VERSION} listening on http://0.0.0.0:${PORT}${BASE || ''}/  (socket.io path: ${SIO_PATH})`);
+  log.info(`Mario Kart Board server v${APP_VERSION} listening on http://0.0.0.0:${PORT}${BASE || ''}/  (socket.io path: ${SIO_PATH})`);
 });

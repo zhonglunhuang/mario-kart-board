@@ -19,10 +19,19 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 # 版本號（給 PWA service worker 判斷是否有新版）
 printf '%s-%s\n' "$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo nogit)" "$(date +%Y%m%d%H%M)" > "$HERE/VERSION"
 echo "==> 版本 $(cat "$HERE/VERSION")"
+# 有比賽進行中就先等（最多 10 分鐘），避免重啟切斷玩家；FORCE=1 可略過
+if [ "${FORCE:-0}" != "1" ]; then
+  for i in $(seq 1 40); do
+    PLAYING=$(ssh "$TARGET" "curl -s -m 5 http://127.0.0.1/mario/healthz" 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("playing",0))' 2>/dev/null || echo 0)
+    if [ "${PLAYING:-0}" = "0" ]; then break; fi
+    echo "   目前有 $PLAYING 場比賽進行中，等待 15 秒後再檢查（第 $i 次）..."
+    sleep 15
+  done
+fi
 echo "==> [1/5] 上傳程式碼到 $TARGET:$REMOTE_DIR"
 ssh "$TARGET" "mkdir -p '$REMOTE_DIR'"
 rsync -az --delete \
-  --exclude node_modules --exclude .git --exclude .env --exclude .claude --exclude test \
+  --exclude node_modules --exclude .git --exclude .env --exclude .claude --exclude test --exclude data \
   "$HERE/" "$TARGET:$REMOTE_DIR/"
 
 echo "==> [2/5] 安裝相依套件 / 服務 / nginx 設定"
@@ -43,6 +52,7 @@ fi
 
 cd "$REMOTE_DIR"
 npm ci --omit=dev --no-audit --no-fund
+mkdir -p "$REMOTE_DIR/data"
 chown -R www-data:www-data "$REMOTE_DIR"
 
 echo "==> [3/5] systemd 服務"

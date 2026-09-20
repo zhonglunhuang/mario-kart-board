@@ -2,6 +2,7 @@
 const crypto = require('crypto');
 const DEFS = require('../public/shared/defs.js');
 const { Race } = require('./game.js');
+const log = require('./log.js');
 
 const CHAR_IDS = new Set(DEFS.CHARACTERS.map((c) => c.id));
 const KART_IDS = new Set(DEFS.KARTS.map((k) => k.id));
@@ -74,10 +75,10 @@ class RoomManager {
   }
 
   roomList() {
-    return [...this.rooms.values()].map((r) => ({
+    return [...this.rooms.values()].filter((r) => !r.restored || r.players.length > 0).map((r) => ({
       id: r.id,
       name: r.name,
-      hostName: this.players.get(r.hostId)?.name || '?',
+      hostName: this.players.get(r.hostId)?.name || r.restoredHostName || '?',
       count: r.players.length,
       maxPlayers: r.maxPlayers,
       laps: r.laps,
@@ -120,6 +121,7 @@ class RoomManager {
       createdAt: Date.now(),
     };
     this.rooms.set(id, room);
+    log.info('room created', { room: id, name: room.name, by: p.name, map: room.map });
     return this.joinRoom(socketId, id);
   }
 
@@ -131,9 +133,11 @@ class RoomManager {
     if (p.roomId) return { error: '你已經在房間裡了' };
     if (room.status !== 'waiting') return { error: '遊戲進行中，無法加入' };
     if (room.players.length >= room.maxPlayers) return { error: '房間已滿' };
+    if (!room.hostId || !this.players.has(room.hostId)) room.hostId = socketId;
     room.players.push(socketId);
     p.roomId = roomId;
     p.ready = socketId === room.hostId;
+    log.info('room join', { room: roomId, player: p.name, id: socketId, count: room.players.length });
     const socket = this.io.sockets.sockets.get(socketId);
     if (socket) socket.join(roomId);
     this.broadcastRoom(roomId);
@@ -152,6 +156,7 @@ class RoomManager {
     if (socket) socket.leave(roomId);
     if (!room) return;
     room.players = room.players.filter((id) => id !== socketId);
+    log.info('room leave', { room: roomId, player: p.name, id: socketId, racing: !!(room.game && !room.game.finished), remaining: room.players.length });
     if (room.voice.has(socketId)) {
       room.voice.delete(socketId);
       this.io.to(roomId).emit('voice:peer-left', { id: socketId });
@@ -164,6 +169,7 @@ class RoomManager {
     if (room.players.length === 0) {
       if (room.game) room.game.destroy();
       this.rooms.delete(roomId);
+      log.info('room deleted (empty)', { room: roomId });
     } else {
       if (room.hostId === socketId) {
         room.hostId = room.players[0];
@@ -246,6 +252,7 @@ class RoomManager {
       emit: (event, payload) => this.io.to(room.id).emit(event, payload),
       onOver: () => this.endGame(room),
     });
+    log.info('race start', { room: room.id, map: room.map, laps: room.laps, bots: botCount, players: roster.filter((q) => !q.bot).map((q) => q.name) });
     this.io.to(room.id).emit('game:start', { room: this.publicRoom(room), state: room.game.snapshot() });
     this.broadcastList();
     return { ok: true };
@@ -319,6 +326,30 @@ class RoomManager {
     const to = String(payload.to || '');
     if (!room || !room.players.includes(to)) return;
     this.io.to(to).emit('voice:signal', { from: socketId, name: p.name, data: payload.data });
+  }
+
+  /* ---------- 重啟前保存 / 重啟後還原房間（只保存設定，玩家重新加入） ---------- */
+  dump() {
+    return [...this.rooms.values()].map((r) => ({ id: r.id, name: r.name, maxPlayers: r.maxPlayers, laps: r.laps, map: r.map, bots: r.bots, difficulty: r.difficulty, variant: r.variant, hostName: this.players.get(r.hostId)?.name || '', savedAt: Date.now() }));
+  }
+
+  restore(list) {
+    let n = 0;
+    for (const r of list || []) {
+      if (!r?.id || this.rooms.has(r.id)) continue;
+      if (Date.now() - (r.savedAt || 0) > 10 * 60 * 1000) continue; // 超過 10 分鐘的不還原
+      this.rooms.set(r.id, {
+        id: r.id, name: r.name, hostId: null, maxPlayers: r.maxPlayers, laps: r.laps, map: r.map, bots: r.bots, difficulty: r.difficulty,
+        variant: r.variant || { reverse: false, mirror: false, time: 'auto', weather: 'auto' }, voice: new Set(), status: 'waiting', players: [], game: null, createdAt: Date.now(), restored: true, restoredHostName: r.hostName,
+      });
+      n++;
+    }
+    if (n) log.info('rooms restored after restart', { count: n });
+    // 還原的房間若 3 分鐘內沒人回來就清掉
+    setTimeout(() => {
+      for (const [id, room] of this.rooms) if (room.restored && room.players.length === 0) this.rooms.delete(id);
+      this.broadcastList();
+    }, 3 * 60 * 1000);
   }
 
   getState(socketId) {

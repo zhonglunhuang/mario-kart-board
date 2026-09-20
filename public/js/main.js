@@ -35,6 +35,17 @@ const state = {
   },
 };
 
+/* ---------- 客戶端紀錄（window.__debug.logs 可查看；重連後回傳伺服器） ---------- */
+const clientLogs = [];
+function clog(msg, data) {
+  const entry = { at: new Date().toISOString(), msg, data };
+  clientLogs.push(entry);
+  if (clientLogs.length > 200) clientLogs.shift();
+  console.log(`[mkb] ${msg}`, data ?? '');
+}
+window.addEventListener('error', (e) => clog('js error', { msg: e.message, src: `${e.filename}:${e.lineno}` }));
+window.addEventListener('unhandledrejection', (e) => clog('unhandled rejection', { msg: String(e.reason?.message || e.reason) }));
+
 /* ---------- 工具 ---------- */
 let toastTimer = null;
 function toast(msg, ms = 2200) {
@@ -362,7 +373,7 @@ function preloadAssets() {
     const lb = $('#load-bar');
     if (lb) lb.style.width = `${Math.round(p * 100)}%`;
     if (p >= 1) setTimeout(() => $('#asset-progress').classList.add('hidden'), 800);
-  }).catch((e) => {
+  }, { simple: getQuality() !== 'high' }).catch((e) => {
     console.error('模型載入失敗', e);
     toast('3D 模型載入失敗，請重新整理', 4000);
     throw e;
@@ -378,6 +389,9 @@ function getQuality() {
     /* ignore */
   }
   return state.isMobile || state.isTouch ? 'medium' : 'high';
+}
+function qualityLabel(q) {
+  return { low: '低', medium: '中', high: '高' }[q] || q;
 }
 function ensureScene(mapId = DEFS.DEFAULT_MAP, variant = {}) {
   const quality = getQuality();
@@ -395,6 +409,7 @@ function ensureScene(mapId = DEFS.DEFAULT_MAP, variant = {}) {
     })
     .then((scene) => {
       state.scene = scene;
+      scene.onQualityDrop = (what, fps) => toast(`偵測到卡頓（${Math.round(fps)} FPS），已自動降低${what}`, 3500);
       return scene;
     })
     .catch((e) => {
@@ -573,32 +588,63 @@ fetch(`${BASE}/config`)
   .catch(() => {});
 
 /* ---------- 連線 ---------- */
+let lastDisconnect = null;
 socket.on('connect', () => {
   $('#conn-status').textContent = '已連線到伺服器';
   splash.status('已連線，準備完成');
   splash.bar(1);
   setTimeout(() => splash.hide(), 150);
+  clog('connected', { transport: socket.io.engine.transport.name, reconnect: !!lastDisconnect });
   if (state.entered) {
+    const prevRoomId = state.room?.id || null;
+    const wasRacing = !!state.race;
     socket.emit('join', { name: state.me.name, character: state.me.character, kart: state.me.kart }, (res) => {
       if (res?.playerId) state.me.id = res.playerId;
-      if (state.room || state.race) {
+      if (lastDisconnect) {
+        socket.emit('client:log', { msg: 'reconnected after disconnect', data: { ...lastDisconnect, wasRacing, prevRoomId, ua: navigator.userAgent.slice(0, 80), offlineSec: Math.round((Date.now() - lastDisconnect.at) / 1000) } });
+        lastDisconnect = null;
+      }
+      if (prevRoomId || wasRacing) {
         leaveRaceView();
         state.room = null;
+        // 嘗試回到原本的房間（伺服器重啟後房間會被還原）
+        if (prevRoomId) {
+          socket.emit('room:join', prevRoomId, (r) => {
+            if (r?.room) {
+              enterRoom(r.room);
+              toast(wasRacing ? '連線中斷，比賽已結束；已回到原房間，可重新開始' : '連線已恢復，已回到原房間', 4000);
+            } else {
+              showScreen('screen-lobby');
+              toast('連線曾中斷，原房間已不存在，請重新加入', 3500);
+              socket.emit('rooms:list', renderRooms);
+            }
+          });
+          return;
+        }
         showScreen('screen-lobby');
-        toast('連線曾中斷，已回到大廳，請重新加入房間', 3500);
+        toast('連線曾中斷，已回到大廳', 3500);
       }
       socket.emit('rooms:list', renderRooms);
     });
   }
 });
-socket.on('disconnect', () => {
-  $('#conn-status').textContent = '與伺服器斷線，重新連線中…';
-  if (state.entered) toast('與伺服器斷線，重新連線中…', 3000);
+socket.on('disconnect', (reason) => {
+  lastDisconnect = { reason, at: Date.now(), racing: !!state.race, hidden: document.visibilityState };
+  clog('disconnected', lastDisconnect);
+  $('#conn-status').textContent = `與伺服器斷線（${reason}），重新連線中…`;
+  if (state.entered) toast(`與伺服器斷線（${reason === 'transport close' ? '連線被關閉' : reason === 'ping timeout' ? '逾時' : reason}），重新連線中…`, 4000);
 });
-socket.on('connect_error', () => {
+socket.on('connect_error', (e) => {
+  clog('connect_error', { msg: e?.message });
   $('#conn-status').textContent = '無法連線到伺服器，重試中…';
   splash.status('無法連線到伺服器，重試中…');
 });
+socket.on('server:restart', ({ seconds } = {}) => {
+  clog('server restart notice', { seconds });
+  toast(`🔧 伺服器更新中，${seconds || 3} 秒後自動重新連線`, 5000);
+});
+socket.io.on('reconnect_attempt', (n) => clog('reconnect attempt', { n }));
+document.addEventListener('visibilitychange', () => clog('visibility', { state: document.visibilityState, racing: !!state.race }));
 
 /* ---------- PWA：service worker 與版本更新 ---------- */
 let swReg = null;
@@ -679,7 +725,7 @@ setInterval(checkServerVersion, 5 * 60 * 1000);
 document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && checkServerVersion());
 
 /* ---------- 啟動 ---------- */
-window.__debug = { state, DEFS };
+window.__debug = { state, DEFS, logs: clientLogs };
 splash.status('連線伺服器…');
 splash.bar(0.6);
 // 5 秒內沒連上也先讓玩家看到畫面（之後會自動重連）

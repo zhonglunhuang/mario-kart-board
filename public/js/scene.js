@@ -92,7 +92,7 @@ export const QUALITY = { low: 0, medium: 1, high: 2 };
 
 export class RaceScene {
   static async create(canvas, opts = {}) {
-    await loadAssets(opts.onProgress);
+    await loadAssets(opts.onProgress, { simple: (QUALITY[opts.quality] ?? 2) < 2 });
     return new RaceScene(canvas, opts);
   }
 
@@ -117,9 +117,15 @@ export class RaceScene {
     this.theme = this.resolveTheme();
     this.night = this.variant.time === 'night';
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.quality >= 1 && !mobile, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.quality === 0 ? 1 : mobile ? 1.5 : 2));
-    this.renderer.shadowMap.enabled = this.quality >= 1;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.quality >= 2 && !mobile, powerPreference: 'high-performance' });
+    this.pixelRatio = Math.min(window.devicePixelRatio || 1, this.quality === 0 ? 1 : this.quality === 1 ? 1.25 : 2);
+    this.renderer.setPixelRatio(this.pixelRatio);
+    // 手機（中 / 低畫質）不用陰影貼圖，改用貼地假陰影
+    this.useShadows = this.quality >= 2;
+    this.renderer.shadowMap.enabled = this.useShadows;
+    this.particleScale = this.quality === 0 ? 0.35 : this.quality === 1 ? 0.6 : 1;
+    this.fps = { acc: 0, n: 0, since: performance.now(), level: this.quality, lastDrop: performance.now() };
+    this.onQualityDrop = null;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -128,7 +134,8 @@ export class RaceScene {
     const th = this.theme;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(th.sky);
-    this.scene.fog = new THREE.Fog(th.fog, th.fogNear, th.fogFar);
+    const fogK = this.quality === 0 ? 0.6 : this.quality === 1 ? 0.8 : 1;
+    this.scene.fog = new THREE.Fog(th.fog, th.fogNear * fogK, th.fogFar * fogK);
 
     this.camera = new THREE.PerspectiveCamera(62, 1, 0.5, 900);
     this.camera.position.set(0, 12, 30);
@@ -141,8 +148,8 @@ export class RaceScene {
     this.scene.add(new THREE.HemisphereLight(this.night ? '#5d6fb8' : '#ffffff', th.ground, this.night ? 0.85 : 1.0));
     this.sun = new THREE.DirectionalLight(th.sun, th.sunIntensity);
     this.sun.position.set(60, 120, 40);
-    this.sun.castShadow = this.quality >= 1;
-    this.sun.shadow.mapSize.set(this.quality >= 2 && !mobile ? 2048 : 1024, this.quality >= 2 && !mobile ? 2048 : 1024);
+    this.sun.castShadow = this.useShadows;
+    this.sun.shadow.mapSize.set(2048, 2048);
     const sc = this.sun.shadow.camera;
     sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70; sc.near = 10; sc.far = 400;
     this.sun.shadow.bias = -0.0006;
@@ -157,9 +164,9 @@ export class RaceScene {
     this.boxes = [];
     this.spinners = [];
     this.lampLights = [];
-    this.particles = new Particles(this.scene, this.quality === 0 ? 1200 : 3000);
-    this.skids = new SkidMarks(this.scene, this.quality === 0 ? 300 : 700);
-    this.weather = this.variant.weather !== 'clear' ? new Weather(this.scene, this.variant.weather, this.quality === 0 ? 400 : 900) : null;
+    this.particles = new Particles(this.scene, this.quality === 0 ? 900 : this.quality === 1 ? 1600 : 3000);
+    this.skids = new SkidMarks(this.scene, this.quality === 0 ? 250 : 600);
+    this.weather = this.variant.weather !== 'clear' && this.quality > 0 ? new Weather(this.scene, this.variant.weather, this.quality === 1 ? 400 : 900) : null;
 
     this.buildWorld();
     this.buildTrack();
@@ -293,7 +300,7 @@ export class RaceScene {
     const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
     const spanX = B.maxX - B.minX + (th.water || th.lava ? 60 : 200);
     const spanZ = B.maxZ - B.minZ + (th.water || th.lava ? 60 : 200);
-    const count = this.quality === 0 ? 90 : this.mobile ? 140 : 260;
+    const count = this.quality === 0 ? 70 : this.quality === 1 ? 120 : 260;
     let placed = 0;
     let tries = 0;
     const s0 = T.sample(0);
@@ -496,7 +503,7 @@ export class RaceScene {
         const p = T.side(t, side * (HALF + 2.2), 8.4);
         bulb.position.set(p.x, p.y, p.z);
         this.scene.add(bulb);
-        if (this.quality >= 1) {
+        if (this.quality >= 2 || (this.quality === 1 && i % 4 === 0)) {
           const light = new THREE.PointLight('#ffe9b0', 60, 48, 1.5);
           light.position.set(p.x, p.y - 1, p.z);
           this.scene.add(light);
@@ -548,7 +555,7 @@ export class RaceScene {
   }
 
   burstBox(p) {
-    this.particles.emit(p.x, p.y, p.z, { count: 26, color: '#ffd54f', size: 0.9, life: 0.7, speed: 9, spread: 0.6, gravity: 18 });
+    this.particles.emit(p.x, p.y, p.z, { count: Math.ceil(26 * this.particleScale), color: '#ffd54f', size: 0.9, life: 0.7, speed: 9, spread: 0.6, gravity: 18 });
     this.particles.emit(p.x, p.y, p.z, { count: 14, color: '#ffffff', size: 0.6, life: 0.5, speed: 6, spread: 0.6 });
   }
 
@@ -569,9 +576,19 @@ export class RaceScene {
     label.scale.set(2.6, 0.65, 1);
     label.visible = !isLocal;
     group.add(label);
-    const star = new THREE.PointLight('#ffd700', 0, 12);
-    star.position.set(0, 1.5, 0);
-    group.add(star);
+    // 貼地假陰影（沒有陰影貼圖時）
+    if (!this.useShadows) {
+      const blob = new THREE.Mesh(new THREE.CircleGeometry(1.9, 14), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.32, depthWrite: false }));
+      blob.rotation.x = -Math.PI / 2;
+      blob.position.y = 0.03;
+      blob.scale.set(1, 1.4, 1);
+      group.add(blob);
+    }
+    // 無敵星星改用車身自發光（不用每台車一盞點光源）
+    const starMats = [];
+    body.traverse((o) => {
+      if (o.isMesh && o.material && o.material.emissive && !o.name.startsWith('wheel')) starMats.push(o.material);
+    });
     // 拖在車後的道具
     const trail = new THREE.Group();
     trail.position.set(0, 0.6, -2.4);
@@ -579,7 +596,7 @@ export class RaceScene {
     group.add(trail);
     setHeadlights(body, this.night);
     this.scene.add(group);
-    const k = { id: p.id, group, body, color: ch.color, label, star, trail, trailKind: null, heavy: !!kart.heavy, weight: kart.weight || 1, x: 0, y: 0, z: 0, rot: 0, speed: 0, air: false, drift: 0, stamp: 0, dispX: 0, dispZ: 0, dispY: 0, dispRot: 0, spinPhase: 0, hint: -1, isLocal: !!isLocal, lean: 0, squash: 0, bot: !!p.bot };
+    const k = { id: p.id, group, body, color: ch.color, label, starMats, trail, trailKind: null, heavy: !!kart.heavy, weight: kart.weight || 1, x: 0, y: 0, z: 0, rot: 0, speed: 0, air: false, drift: 0, stamp: 0, dispX: 0, dispZ: 0, dispY: 0, dispRot: 0, spinPhase: 0, hint: -1, isLocal: !!isLocal, lean: 0, squash: 0, bot: !!p.bot };
     this.karts.set(p.id, k);
     return k;
   }
@@ -725,9 +742,45 @@ export class RaceScene {
     }
   }
 
+  /** 依 FPS 自動降畫質：解析度 → 陰影 → 天氣 / 粒子 */
+  adapt(dt) {
+    const f = this.fps;
+    f.acc += dt;
+    f.n++;
+    const nowP = performance.now();
+    if (nowP - f.since < 4000) return;
+    const avg = f.n / f.acc;
+    f.acc = 0; f.n = 0; f.since = nowP;
+    if (avg >= 34 || nowP - f.lastDrop < 6000) return;
+    f.lastDrop = nowP;
+    let msg = null;
+    if (this.pixelRatio > 1) {
+      this.pixelRatio = 1;
+      this.renderer.setPixelRatio(1);
+      this.resize();
+      msg = '解析度';
+    } else if (this.useShadows) {
+      this.useShadows = false;
+      this.renderer.shadowMap.enabled = false;
+      this.sun.castShadow = false;
+      this.scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
+      msg = '陰影';
+    } else if (this.particleScale > 0.35 || this.weather) {
+      this.particleScale = 0.35;
+      if (this.weather) { this.weather.points.visible = false; this.weather = null; }
+      if (this.composer) this.composer = null;
+      msg = '粒子與天氣';
+    }
+    if (msg) {
+      console.log(`[mkb] fps ${avg.toFixed(0)} → 降低 ${msg}`);
+      this.onQualityDrop?.(msg, avg);
+    }
+  }
+
   frame() {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     const t = performance.now() / 1000;
+    this.adapt(dt);
     for (const s of this.spinners) {
       s.rotation.y += dt * 1.6;
       s.rotation.x += dt * 0.8;
@@ -747,11 +800,20 @@ export class RaceScene {
     for (const [, b] of this.bananas) b.rotation.y += dt * 0.5;
     for (const [, k] of this.karts) {
       for (const w of k.body.userData.wheels) w.rotation.x += k.speed * dt * 0.9;
-      k.body.userData.mixer?.update(dt * (0.6 + Math.min(1, Math.abs(k.speed) / 30)));
-      k.star.intensity = k.starOn ? 4 + Math.sin(t * 20) * 2 : 0;
+      // 遠處的車不更新骨骼動畫（省 CPU）
+      if (k.isLocal || k.group.position.distanceToSquared(this.camera.position) < 60 * 60) k.body.userData.mixer?.update(dt * (0.6 + Math.min(1, Math.abs(k.speed) / 30)));
+      if (k.starOn) {
+        const c = new THREE.Color().setHSL((t * 2) % 1, 1, 0.5);
+        for (const m of k.starMats) { m.emissive.copy(c); m.emissiveIntensity = 0.7; }
+        k.starWas = true;
+      } else if (k.starWas) {
+        for (const m of k.starMats) { m.emissive.setRGB(0, 0, 0); m.emissiveIntensity = 1; }
+        k.starWas = false;
+      }
       k.squash += (0 - k.squash) * Math.min(1, dt * 8);
       if (k.trail.visible) k.trail.rotation.y += dt * 4;
     }
+    this.particles.scale = this.particleScale;
     this.particles.update(dt);
     this.skids.update(dt);
     this.weather?.update(dt, this.camera.position);

@@ -2,6 +2,7 @@
 /* 即時競速的伺服器端狀態：倒數、圈數/檢查點、排名、道具、命中、完賽、AI 車手席位。
  * 車輛物理由各客戶端自己模擬並回報位置（AI 車由房主的客戶端模擬）；伺服器負責裁判與同步。 */
 const DEFS = require('../public/shared/defs.js');
+const log = require('./log.js');
 
 const D = DEFS.DURATIONS;
 const TICK_MS = 50;
@@ -144,13 +145,16 @@ class Race {
   checkOver() {
     if (this.finished) return;
     // 沒有真人在跑了就結束（AI 不用等）
-    if (this.racing().filter((p) => !p.bot).length === 0 || this.active().length === 0) this.over();
+    if (this.active().length === 0) this.over('no-players');
+    else if (this.racing().filter((p) => !p.bot).length === 0) this.over('all-humans-finished');
   }
 
-  over() {
+  over(reason = 'unknown') {
     if (this.finished) return;
     this.finished = true;
     this.phase = 'over';
+    this.overReason = reason;
+    log.info('race over', { map: this.map, reason, players: this.active().map((p) => `${p.name}${p.bot ? '(AI)' : ''}:${p.finished ? p.rank : 'dnf'}`) });
     for (const p of this.racing()) {
       p.finished = true;
       p.rank = this.finishOrder.length + 1;
@@ -317,13 +321,16 @@ class Race {
       this.emit('race:event', { type: 'go' });
     }
     if (this.phase === 'racing' && this.firstFinishAt && t - this.firstFinishAt > D.finishGraceMs) {
-      this.over();
+      this.over('grace-timeout');
       return;
     }
     for (const p of this.active()) {
       if (p.bot) continue;
       // 還在載入場景（尚未回報過）的玩家不算掉線；socket 斷線另有處理
-      if (p.reported && t - p.lastSeen > 30000 && this.phase === 'racing') this.removePlayer(p.id);
+      if (p.reported && t - p.lastSeen > 30000 && this.phase === 'racing') {
+        log.warn('player inactive, removed from race', { id: p.id, name: p.name, silentMs: t - p.lastSeen });
+        this.removePlayer(p.id);
+      }
     }
     if (this.finished) return;
     this.emit('race:snapshot', this.snapshot());

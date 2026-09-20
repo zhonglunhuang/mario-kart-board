@@ -17,7 +17,20 @@ const VEHICLES = {
 const NATURE = ['tree_default', 'tree_detailed', 'tree_oak', 'tree_pineDefaultA', 'tree_pineRoundA', 'tree_palm', 'tree_palmDetailedShort', 'tree_pineTallA', 'tree_pineSmallA', 'tree_cone', 'tree_thin', 'rock_largeA', 'rock_largeB', 'rock_smallA', 'rock_tallA', 'rock_tallB', 'flower_redA', 'flower_yellowA', 'flower_purpleA', 'mushroom_red', 'mushroom_tan', 'grass_large'];
 const RACING = ['overhead', 'barrierRed', 'barrierWhite', 'flagCheckers', 'grandStand', 'grandStandCovered', 'tent', 'tentClosed', 'lightPostModern', 'lightPostLarge', 'billboard', 'pylon', 'ramp', 'pitsGarage', 'pitsOffice', 'pitsGarageClosed'];
 
-export const assets = { vehicles: {}, characters: {}, nature: {}, racing: {}, ready: false };
+export const assets = { vehicles: {}, characters: {}, nature: {}, racing: {}, ready: false, simple: false };
+
+/** 把 PBR 材質換成便宜的 Lambert（手機用），保留貼圖與顏色 */
+export function simplify(material) {
+  if (!material || material.isMeshLambertMaterial || material.isMeshBasicMaterial) return material;
+  const m = new THREE.MeshLambertMaterial({ color: material.color?.clone?.() ?? 0xffffff, map: material.map || null, transparent: material.transparent, opacity: material.opacity, side: material.side, emissive: material.emissive?.clone?.() ?? 0x000000, emissiveIntensity: material.emissiveIntensity ?? 1 });
+  m.name = material.name;
+  return m;
+}
+function simplifyTree(root) {
+  root.traverse((o) => {
+    if (o.isMesh && o.material) o.material = simplify(o.material);
+  });
+}
 const texCache = new Map();
 let loadPromise = null;
 
@@ -114,8 +127,9 @@ function bbox(obj) {
 }
 
 /* ---------- 載入 ---------- */
-export function loadAssets(onProgress) {
+export function loadAssets(onProgress, { simple = false } = {}) {
   if (loadPromise) return loadPromise;
+  assets.simple = simple;
   const loader = new GLTFLoader();
   const total = Object.keys(VEHICLES).length + DEFS.CHARACTERS.length + NATURE.length + RACING.length;
   let done = 0;
@@ -157,6 +171,12 @@ export function loadAssets(onProgress) {
     for (const n of NATURE) jobs.push(load(`${BASE}nature/${n}.glb`).then((g) => { assets.nature[n] = prep(g.scene); }));
     for (const r of RACING) jobs.push(load(`${BASE}racing/${r}.glb`).then((g) => { assets.racing[r] = prep(g.scene); }));
     await Promise.all(jobs);
+    if (simple) {
+      for (const v of Object.values(assets.vehicles)) simplifyTree(v.root);
+      for (const c of Object.values(assets.characters)) simplifyTree(c.root);
+      for (const n of Object.values(assets.nature)) simplifyTree(n.root);
+      for (const r of Object.values(assets.racing)) simplifyTree(r.root);
+    }
     assets.ready = true;
     return assets;
   })();

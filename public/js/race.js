@@ -873,11 +873,11 @@ export class RaceController {
       if (this.isHost && this.bots.size) payload.bots = [...this.bots.values()].map((b) => ({ id: b.id, ...b.phys.snapshot(), shells: shellsOf(b.id), bombs: bombsOf(b.id) }));
       this.socket.volatile.emit('race:state', payload);
     }
-    if (nowP - this.lastHud > 100) {
+    if (nowP - this.lastHud > (this.isTouch ? 180 : 100)) {
       this.lastHud = nowP;
       this.renderHud(now);
     }
-    if (nowP - this.lastMini > 120) {
+    if (nowP - this.lastMini > (this.isTouch ? 200 : 120)) {
       this.lastMini = nowP;
       this.drawMinimap();
     }
@@ -908,9 +908,10 @@ export class RaceController {
   renderHud(now) {
     const me = this.players.get(this.meId);
     const lapNow = Math.min(this.laps, (me?.lap ?? 0) + 1);
-    $('#hud-lap').textContent = `第 ${lapNow} / ${this.laps} 圈`;
-    $('#hud-pos').textContent = `第 ${me?.standing ?? 1} 名`;
-    $('#hud-speed').textContent = `${Math.round(Math.abs(this.phys.speed) * 2.6)} km/h`;
+    const setText = (sel, txt) => { const el = $(sel); if (el && el.textContent !== txt) el.textContent = txt; };
+    setText('#hud-lap', `第 ${lapNow} / ${this.laps} 圈`);
+    setText('#hud-pos', `第 ${me?.standing ?? 1} 名`);
+    setText('#hud-speed', `${Math.round(Math.abs(this.phys.speed) * 2.6)} km/h`);
     const slot = $('#hud-item');
     const tcItem = $('#tc-item');
     const nameEl = $('#hud-item-name');
@@ -965,13 +966,17 @@ export class RaceController {
     } else dbar.classList.add('hidden');
 
     const list = (this.snapPlayers || []).filter((p) => !p.dropped).sort((a, b) => a.standing - b.standing);
-    $('#hud-standings').innerHTML = list
+    const standingsHtml = list
       .map((p) => {
         const ch = DEFS.CHARACTERS.find((c) => c.id === p.character);
         const status = p.finished ? `🏁 ${fmtTime(p.finishTime)}` : `第 ${Math.min(this.laps, p.lap + 1)} 圈`;
         return `<div class="st-row${p.id === this.meId ? ' me' : ''}"><span class="rank">${p.standing}</span><span class="dot" style="background:${ch?.color}"></span><span class="name">${esc(p.name)}${p.bot ? ' 🤖' : ''}</span><span class="it">${itemLabel(p.item)}</span><span class="sub">${status}</span></div>`;
       })
       .join('');
+    if (standingsHtml !== this.lastStandingsHtml) {
+      this.lastStandingsHtml = standingsHtml;
+      $('#hud-standings').innerHTML = standingsHtml;
+    }
     this.renderMsgs();
     const badges = [];
     if (now < this.eff.starUntil) badges.push('⭐ 無敵');
