@@ -1,0 +1,10 @@
+services:
+  mario-kart:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3100:3100"
+    environment:
+      PORT: 3100
+      BASE_PATH: /mario
+      TURN_SECONDS: 45

@@ -1,0 +1,23 @@
+{
+  "name": "mario-kart-board",
+  "version": "1.0.0",
+  "description": "多人連線 3D 賽車桌遊（Node.js + Socket.IO + Three.js）",
+  "main": "server/index.js",
+  "private": true,
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test test/e2e.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3"
+  }
+}

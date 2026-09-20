@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>賽車桌遊 Online</title>
+  <meta name="description" content="多人連線 3D 賽車桌遊：開房間、選角色、選車種、擲骰子競速。" />
+  <meta name="theme-color" content="#1a1a2e" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three/build/three.module.js", "three/addons/": "./vendor/three/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+
+  <!-- 玩家設定 -->
+  <section id="screen-profile" class="screen">
+    <div class="card">
+      <h1>🏁 賽車桌遊 Online</h1>
+      <p class="muted">擲骰子、搶道具、撞開對手，第一個跑完圈數的人獲勝！</p>
+      <label class="field">暱稱
+        <input id="in-name" maxlength="12" placeholder="輸入你的名字" autocomplete="nickname" />
+      </label>
+      <h3>選擇角色</h3>
+      <div id="char-grid" class="grid"></div>
+      <h3>選擇車種</h3>
+      <div id="kart-grid" class="grid karts"></div>
+      <button id="btn-enter" class="btn primary big">進入大廳</button>
+      <p id="conn-status" class="muted small"></p>
+    </div>
+  </section>
+
+  <!-- 大廳 -->
+  <section id="screen-lobby" class="screen hidden">
+    <div class="card">
+      <header class="bar">
+        <div id="lobby-me" class="me"></div>
+        <button id="btn-edit-profile" class="btn ghost">✏️ 修改</button>
+      </header>
+      <div class="row between">
+        <h2>房間列表</h2>
+        <button id="btn-refresh" class="btn ghost" title="重新整理">🔄</button>
+      </div>
+      <div id="room-list" class="list"></div>
+      <button id="btn-open-create" class="btn primary big">＋ 開新房間</button>
+      <p class="muted small">把這個網址傳給朋友，大家用手機打開就能一起玩。</p>
+    </div>
+  </section>
+
+  <!-- 開房間 -->
+  <div id="dlg-create" class="modal hidden">
+    <div class="card">
+      <h2>開新房間</h2>
+      <label class="field">房間名稱 <input id="in-room-name" maxlength="20" placeholder="例如：晚上來一場" /></label>
+      <label class="field">圈數
+        <select id="in-room-laps">
+          <option value="1">1 圈（約 5 分鐘）</option>
+          <option value="2" selected>2 圈（約 10 分鐘）</option>
+          <option value="3">3 圈</option>
+        </select>
+      </label>
+      <label class="field">人數上限
+        <select id="in-room-max">
+          <option value="2">2 人</option>
+          <option value="3">3 人</option>
+          <option value="4" selected>4 人</option>
+          <option value="6">6 人</option>
+          <option value="8">8 人</option>
+        </select>
+      </label>
+      <div class="row">
+        <button id="btn-create" class="btn primary">建立房間</button>
+        <button id="btn-cancel-create" class="btn ghost">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 房間等待 -->
+  <section id="screen-room" class="screen hidden">
+    <div class="card">
+      <header class="bar">
+        <button id="btn-leave-room" class="btn ghost">← 離開</button>
+        <div class="title"><span id="room-title"></span><span id="room-meta" class="muted small"></span></div>
+      </header>
+      <div id="room-players" class="list"></div>
+      <div id="room-host-settings" class="row hidden">
+        <label class="field inline">圈數
+          <select id="in-set-laps"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+        </label>
+        <label class="field inline">上限
+          <select id="in-set-max"><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8</option></select>
+        </label>
+      </div>
+      <div class="row">
+        <button id="btn-ready" class="btn primary big">✅ 準備</button>
+        <button id="btn-start" class="btn primary big hidden">🚦 開始遊戲</button>
+      </div>
+      <p id="room-hint" class="muted small"></p>
+      <div class="chat">
+        <div id="room-chat-log" class="chat-log"></div>
+        <form id="room-chat-form" class="chat-form">
+          <input id="room-chat-input" maxlength="120" placeholder="聊天…" autocomplete="off" />
+          <button class="btn ghost" type="submit">送出</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- 遊戲 HUD -->
+  <section id="screen-game" class="screen hud hidden">
+    <div id="hud-top">
+      <div id="turn-info" class="pill"></div>
+      <div id="turn-timer" class="pill timer"></div>
+      <div class="hud-actions">
+        <button id="btn-toggle-players" class="btn icon" title="玩家">📋</button>
+        <button id="btn-toggle-log" class="btn icon" title="紀錄">📜</button>
+        <button id="btn-camera" class="btn icon" title="切換視角">🎥</button>
+        <button id="btn-help" class="btn icon" title="說明">❓</button>
+        <button id="btn-quit" class="btn icon" title="離開">🚪</button>
+      </div>
+    </div>
+
+    <div id="hud-players" class="panel"></div>
+    <div id="hud-log" class="panel log"></div>
+
+    <div id="hud-help" class="panel help hidden">
+      <h3>格子效果</h3>
+      <div id="help-tiles"></div>
+      <h3>道具</h3>
+      <div id="help-items"></div>
+      <h3>車種能力</h3>
+      <div id="help-karts"></div>
+      <p class="muted small">規則：輪到你時可先用一個道具，再擲骰子前進。停在別人的格子會把對方撞退。先跑完指定圈數者獲勝。逾時會自動擲骰。</p>
+      <button id="btn-help-close" class="btn ghost">關閉</button>
+    </div>
+
+    <div id="hud-bottom">
+      <div id="my-items" class="items"></div>
+      <div id="dice" class="dice">?</div>
+      <button id="btn-roll" class="btn primary roll" disabled>🎲 擲骰子</button>
+    </div>
+
+    <div id="chat-overlay" class="chat-overlay">
+      <div id="game-chat-log" class="chat-log"></div>
+      <form id="game-chat-form" class="chat-form">
+        <input id="game-chat-input" maxlength="120" placeholder="聊天…" autocomplete="off" />
+        <button class="btn ghost" type="submit">送出</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- 結果 -->
+  <div id="dlg-result" class="modal hidden">
+    <div class="card">
+      <h2>🏆 比賽結果</h2>
+      <div id="result-list" class="list"></div>
+      <button id="btn-result-close" class="btn primary big">回到房間</button>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="shared/defs.js"></script>
+  <script src="socket.io/socket.io.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
