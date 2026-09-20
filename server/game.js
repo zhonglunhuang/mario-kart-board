@@ -43,7 +43,7 @@ class Race {
         spinUntil: 0, boostUntil: 0, starUntil: 0, slowUntil: 0, goldenUntil: 0,
         finished: false, rank: null, finishTime: null, dropped: false,
         shells: [], bombs: [],
-        lastSeen: now(),
+        lastSeen: now(), reported: false,
       });
     });
     this.bananas = new Map();
@@ -100,6 +100,7 @@ class Race {
     const p = this.actorFor(senderId, asId);
     if (!p) return;
     p.lastSeen = now();
+    p.reported = true;
     const num = (v, def = 0) => (Number.isFinite(v) ? v : def);
     p.x = num(s.x); p.y = num(s.y); p.z = num(s.z); p.rot = num(s.rot); p.speed = num(s.speed);
     p.airborne = !!s.air;
@@ -321,7 +322,8 @@ class Race {
     }
     for (const p of this.active()) {
       if (p.bot) continue;
-      if (t - p.lastSeen > 15000 && this.phase === 'racing') this.removePlayer(p.id);
+      // 還在載入場景（尚未回報過）的玩家不算掉線；socket 斷線另有處理
+      if (p.reported && t - p.lastSeen > 30000 && this.phase === 'racing') this.removePlayer(p.id);
     }
     if (this.finished) return;
     this.emit('race:snapshot', this.snapshot());

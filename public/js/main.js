@@ -213,6 +213,7 @@ $('#btn-create').onclick = async () => {
 function enterRoom(room) {
   state.room = room;
   preloadAssets().catch(() => {});
+  prebuildScene();
   $('#room-chat-log').innerHTML = '';
   renderRoom();
   showScreen('screen-room');
@@ -268,11 +269,22 @@ function renderRoom() {
       ? '等待房主開始比賽…'
       : '按「準備」告訴房主你準備好了。';
 }
+let prebuildTimer = null;
+function prebuildScene() {
+  // 房間設定確定後就在背景先把場景建好，開賽時不用等
+  clearTimeout(prebuildTimer);
+  prebuildTimer = setTimeout(() => {
+    const r = state.room;
+    if (!r || state.race) return;
+    ensureScene(r.map || DEFS.DEFAULT_MAP, r.variant || {}).catch(() => {});
+  }, 800);
+}
 socket.on('room:state', (room) => {
   const wasIn = !!state.room;
   state.room = room;
   renderRoom();
   if (!wasIn) showScreen('screen-room');
+  if (room.status === 'waiting') prebuildScene();
 });
 $('#btn-ready').onclick = () => {
   const me = state.room?.players.find((p) => p.id === state.me.id);

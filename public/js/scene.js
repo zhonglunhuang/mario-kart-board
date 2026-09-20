@@ -565,8 +565,8 @@ export class RaceScene {
     group.add(body);
     body.userData = group.userData;
     const label = makeTextSprite(p.name + (p.bot ? ' 🤖' : ''), { width: 256, height: 64, bg: 'rgba(0,0,0,0.5)' });
-    label.position.set(0, 3.6, 0);
-    label.scale.set(4, 1, 1);
+    label.position.set(0, 3.4, 0);
+    label.scale.set(2.6, 0.65, 1);
     label.visible = !isLocal;
     group.add(label);
     const star = new THREE.PointLight('#ffd700', 0, 12);
