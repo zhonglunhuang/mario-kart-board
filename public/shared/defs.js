@@ -1,33 +1,97 @@
 /* 伺服器與瀏覽器共用的遊戲定義 */
 (function (exports) {
-  // 賽道控制點（封閉曲線，客戶端用 CatmullRom 生成道路；伺服器只用「進度 t」判定圈數）
-  exports.TRACK = {
-    controlPoints: [
-      [0, 0, 0], [60, 0, -4], [110, 1, -30], [130, 6, -85], [100, 12, -145], [35, 12, -165],
-      [-40, 9, -155], [-90, 4, -115], [-140, 1, -70], [-125, 0, -15], [-75, 0, 12], [-30, 0, 8],
-    ],
-    width: 18, // 路面總寬
-    laps: 3,
-    // 道具箱位置：t = 賽道進度，lane = 橫向偏移（-1..1）
-    itemBoxes: [
-      { t: 0.08, lane: -0.6 }, { t: 0.08, lane: 0 }, { t: 0.08, lane: 0.6 },
-      { t: 0.31, lane: -0.6 }, { t: 0.31, lane: 0 }, { t: 0.31, lane: 0.6 },
-      { t: 0.55, lane: -0.6 }, { t: 0.55, lane: 0 }, { t: 0.55, lane: 0.6 },
-      { t: 0.8, lane: -0.6 }, { t: 0.8, lane: 0 }, { t: 0.8, lane: 0.6 },
-    ],
-    checkpoints: [0.25, 0.5, 0.75],
-    itemBoxRespawnMs: 4000,
+  const CHECKPOINTS = [0.25, 0.5, 0.75];
+  const boxes = (ts) => ts.flatMap((t) => [-0.6, 0, 0.6].map((lane) => ({ t, lane })));
+
+  // 地圖：controlPoints 為封閉曲線的控制點（客戶端用 CatmullRom 生成道路）
+  exports.MAPS = {
+    meadow: {
+      id: 'meadow',
+      name: '綠野賽道',
+      emoji: '🌳',
+      desc: '平坦寬闊，適合新手',
+      difficulty: 1,
+      width: 18,
+      controlPoints: [
+        [0, 0, 0], [60, 0, -4], [110, 1, -30], [130, 6, -85], [100, 12, -145], [35, 12, -165],
+        [-40, 9, -155], [-90, 4, -115], [-140, 1, -70], [-125, 0, -15], [-75, 0, 12], [-30, 0, 8],
+      ],
+      itemBoxes: boxes([0.08, 0.31, 0.55, 0.8]),
+      checkpoints: CHECKPOINTS,
+      theme: {
+        sky: '#8fd3ff', fog: '#a9dcff', fogNear: 170, fogFar: 460,
+        ground: '#5fae3f', groundNoise: '#2f6b20', hills: '#4e8f3f', road: '#3b3b44',
+        trees: ['tree_default', 'tree_detailed', 'tree_oak', 'tree_pineDefaultA', 'tree_pineRoundA'],
+        rocks: ['rock_largeA', 'rock_largeB'],
+        flowers: ['flower_redA', 'flower_yellowA', 'flower_purpleA'],
+        extras: ['mushroom_red', 'mushroom_tan'],
+        grass: 'grass_large',
+        sun: '#fff4d6', sunIntensity: 1.9,
+      },
+    },
+    canyon: {
+      id: 'canyon',
+      name: '峽谷沙漠',
+      emoji: '🏜️',
+      desc: '髮夾彎與 S 型連續彎，難度中等',
+      difficulty: 2,
+      width: 16,
+      controlPoints: [
+        [0, 0, 0], [70, 0, -5], [120, 3, -30], [150, 8, -80], [125, 14, -125], [78, 14, -108],
+        [36, 10, -145], [62, 6, -195], [20, 4, -228], [-45, 2, -205], [-62, 6, -152], [-112, 10, -132],
+        [-152, 6, -80], [-132, 2, -30], [-82, 0, -5], [-30, 0, 3],
+      ],
+      itemBoxes: boxes([0.07, 0.24, 0.42, 0.6, 0.78, 0.93]),
+      checkpoints: CHECKPOINTS,
+      theme: {
+        sky: '#ffcf8a', fog: '#f5c98f', fogNear: 150, fogFar: 420,
+        ground: '#e0b96a', groundNoise: '#a8783a', hills: '#c2703f', road: '#4a4038',
+        trees: ['tree_palm', 'tree_palmDetailedShort', 'tree_palm'],
+        rocks: ['rock_tallA', 'rock_tallB', 'rock_largeA', 'rock_largeB'],
+        flowers: ['flower_yellowA'],
+        extras: ['rock_smallA'],
+        grass: 'grass_large',
+        sun: '#ffe2b0', sunIntensity: 2.2,
+      },
+    },
+    alpine: {
+      id: 'alpine',
+      name: '雪山高地',
+      emoji: '🏔️',
+      desc: '大幅爬升與下坡，窄路高難度',
+      difficulty: 3,
+      width: 14,
+      controlPoints: [
+        [0, 0, 0], [50, 2, -10], [92, 10, -42], [102, 22, -92], [72, 32, -132], [20, 36, -152],
+        [-32, 34, -132], [-22, 26, -92], [-62, 20, -72], [-112, 14, -92], [-132, 8, -42], [-92, 2, -10], [-40, 0, 2],
+      ],
+      itemBoxes: boxes([0.1, 0.3, 0.52, 0.72, 0.9]),
+      checkpoints: CHECKPOINTS,
+      theme: {
+        sky: '#cfe6ff', fog: '#e6f1ff', fogNear: 120, fogFar: 380,
+        ground: '#f2f6fa', groundNoise: '#b9c9d8', hills: '#dfe9f2', road: '#4b4f58',
+        trees: ['tree_pineTallA', 'tree_pineDefaultA', 'tree_pineSmallA', 'tree_cone'],
+        rocks: ['rock_largeA', 'rock_tallA'],
+        flowers: [],
+        extras: ['rock_smallA'],
+        grass: null,
+        sun: '#ffffff', sunIntensity: 1.7,
+      },
+    },
   };
+  exports.MAP_IDS = Object.keys(exports.MAPS);
+  exports.DEFAULT_MAP = 'meadow';
+  exports.ITEM_BOX_RESPAWN_MS = 4000;
 
   exports.CHARACTERS = [
-    { id: 'mario', model: 'male-a', name: '瑪利歐', color: '#e52521', hat: 'cap', hatColor: '#e52521', shirt: '#1560bd', mustache: true, skin: '#f5c9a4' },
-    { id: 'luigi', model: 'male-b', name: '路易吉', color: '#43b047', hat: 'cap', hatColor: '#43b047', shirt: '#1560bd', mustache: true, skin: '#f5c9a4' },
-    { id: 'peach', model: 'female-a', name: '碧姬公主', color: '#f7a1c4', hat: 'crown', hatColor: '#ffd700', shirt: '#f7a1c4', hair: '#ffe066', skin: '#f9dcc4' },
-    { id: 'yoshi', model: 'male-c', name: '耀西', color: '#63d34d', hat: 'none', shirt: '#ffffff', skin: '#63d34d', snout: true },
-    { id: 'toad', model: 'female-b', name: '奇諾比奧', color: '#f0f0f0', hat: 'mushroom', hatColor: '#ffffff', spots: '#e52521', shirt: '#1e90ff', skin: '#f9dcc4' },
-    { id: 'bowser', model: 'male-d', name: '庫巴', color: '#f2a300', hat: 'spikes', hatColor: '#e52521', shirt: '#4caf50', skin: '#8bc34a', bigger: true },
-    { id: 'dk', model: 'male-e', name: '森喜剛', color: '#8b4513', hat: 'none', shirt: '#8b4513', skin: '#8b4513', tie: '#e52521', bigger: true },
-    { id: 'wario', model: 'male-f', name: '瓦利歐', color: '#f2e100', hat: 'cap', hatColor: '#f2e100', shirt: '#7b1fa2', mustache: true, skin: '#f5c9a4' },
+    { id: 'mario', model: 'male-a', name: '瑪利歐', color: '#e52521' },
+    { id: 'luigi', model: 'male-b', name: '路易吉', color: '#43b047' },
+    { id: 'peach', model: 'female-a', name: '碧姬公主', color: '#f7a1c4' },
+    { id: 'yoshi', model: 'male-c', name: '耀西', color: '#63d34d' },
+    { id: 'toad', model: 'female-b', name: '奇諾比奧', color: '#f0f0f0' },
+    { id: 'bowser', model: 'male-d', name: '庫巴', color: '#f2a300' },
+    { id: 'dk', model: 'male-e', name: '森喜剛', color: '#8b4513' },
+    { id: 'wario', model: 'male-f', name: '瓦利歐', color: '#f2e100' },
   ];
 
   // 車種數值：maxSpeed 極速、accel 加速度、turn 轉向速率、offroad 出界後保留的速度比例

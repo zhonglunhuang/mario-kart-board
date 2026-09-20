@@ -10,7 +10,7 @@ WorkingDirectory=/srv/mario-kart-board
 Environment=NODE_ENV=production
 Environment=PORT=3100
 Environment=BASE_PATH=/mario
-Environment=TURN_SECONDS=45
+EnvironmentFile=-/etc/mario-kart.env
 ExecStart=/usr/bin/node server/index.js
 Restart=always
 RestartSec=3

@@ -60,7 +60,9 @@ class RoomManager {
       hostId: room.hostId,
       maxPlayers: room.maxPlayers,
       laps: room.laps,
+      map: room.map,
       status: room.status,
+      voice: [...room.voice],
       players: room.players.map((id) => {
         const p = this.players.get(id);
         return { id, name: p.name, character: p.character, kart: p.kart, ready: p.ready, isHost: id === room.hostId };
@@ -76,6 +78,7 @@ class RoomManager {
       count: r.players.length,
       maxPlayers: r.maxPlayers,
       laps: r.laps,
+      map: r.map,
       status: r.status,
     }));
   }
@@ -101,7 +104,9 @@ class RoomManager {
       name: clean(opts.name, 20) || `${p.name} 的房間`,
       hostId: socketId,
       maxPlayers: Math.min(8, Math.max(2, parseInt(opts.maxPlayers, 10) || 4)),
-      laps: Math.min(5, Math.max(1, parseInt(opts.laps, 10) || 2)),
+      laps: Math.min(5, Math.max(1, parseInt(opts.laps, 10) || 3)),
+      map: DEFS.MAPS[opts.map] ? opts.map : DEFS.DEFAULT_MAP,
+      voice: new Set(),
       status: 'waiting',
       players: [],
       game: null,
@@ -140,6 +145,10 @@ class RoomManager {
     if (socket) socket.leave(roomId);
     if (!room) return;
     room.players = room.players.filter((id) => id !== socketId);
+    if (room.voice.has(socketId)) {
+      room.voice.delete(socketId);
+      this.io.to(roomId).emit('voice:peer-left', { id: socketId });
+    }
 
     if (room.game && !room.game.finished) {
       room.game.removePlayer(socketId);
@@ -177,6 +186,7 @@ class RoomManager {
     if (opts.laps) room.laps = Math.min(5, Math.max(1, parseInt(opts.laps, 10) || room.laps));
     if (opts.maxPlayers) room.maxPlayers = Math.min(8, Math.max(room.players.length, parseInt(opts.maxPlayers, 10) || room.maxPlayers));
     if (opts.name !== undefined) room.name = clean(opts.name, 20) || room.name;
+    if (opts.map && DEFS.MAPS[opts.map]) room.map = opts.map;
     this.broadcastRoom(room.id);
     this.broadcastList();
     return { ok: true };
@@ -200,6 +210,7 @@ class RoomManager {
     room.status = 'playing';
     room.game = new Race(roster, {
       laps: room.laps,
+      map: room.map,
       emit: (event, payload) => this.io.to(room.id).emit(event, payload),
       onOver: () => this.endGame(room),
     });
@@ -242,6 +253,38 @@ class RoomManager {
     this.io.to(room.id).emit('game:over', { result, room: this.publicRoom(room) });
     this.broadcastRoom(room.id);
     this.broadcastList();
+  }
+
+  /* ---------- 語音 ---------- */
+  voiceJoin(socketId) {
+    const p = this.players.get(socketId);
+    if (!p || !p.roomId) return { error: '不在房間裡' };
+    const room = this.rooms.get(p.roomId);
+    if (!room) return { error: '房間不存在' };
+    const peers = [...room.voice].filter((id) => id !== socketId).map((id) => ({ id, name: this.players.get(id)?.name || '?' }));
+    room.voice.add(socketId);
+    this.io.to(room.id).except(socketId).emit('voice:peer-joined', { id: socketId, name: p.name });
+    this.broadcastRoom(room.id);
+    return { ok: true, peers };
+  }
+
+  voiceLeave(socketId) {
+    const p = this.players.get(socketId);
+    if (!p || !p.roomId) return;
+    const room = this.rooms.get(p.roomId);
+    if (!room || !room.voice.has(socketId)) return;
+    room.voice.delete(socketId);
+    this.io.to(room.id).emit('voice:peer-left', { id: socketId });
+    this.broadcastRoom(room.id);
+  }
+
+  voiceSignal(socketId, payload) {
+    const p = this.players.get(socketId);
+    if (!p || !p.roomId || !payload) return;
+    const room = this.rooms.get(p.roomId);
+    const to = String(payload.to || '');
+    if (!room || !room.players.includes(to)) return;
+    this.io.to(to).emit('voice:signal', { from: socketId, name: p.name, data: payload.data });
   }
 
   getState(socketId) {

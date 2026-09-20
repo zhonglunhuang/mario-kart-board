@@ -14,7 +14,7 @@ const VEHICLES = {
   bike: { file: 'race-future', length: 3.6, seat: [0, 0.32, -0.2] },
   monster: { file: 'tractor', length: 3.8, seat: [0, 0.78, -0.15] },
 };
-const NATURE = ['tree_default', 'tree_detailed', 'tree_oak', 'tree_pineDefaultA', 'tree_pineRoundA', 'rock_largeA', 'rock_largeB', 'rock_smallA', 'flower_redA', 'flower_yellowA', 'flower_purpleA', 'mushroom_red', 'mushroom_tan', 'grass_large'];
+const NATURE = ['tree_default', 'tree_detailed', 'tree_oak', 'tree_pineDefaultA', 'tree_pineRoundA', 'tree_palm', 'tree_palmDetailedShort', 'tree_pineTallA', 'tree_pineSmallA', 'tree_cone', 'rock_largeA', 'rock_largeB', 'rock_smallA', 'rock_tallA', 'rock_tallB', 'flower_redA', 'flower_yellowA', 'flower_purpleA', 'mushroom_red', 'mushroom_tan', 'grass_large'];
 const RACING = ['overhead', 'barrierRed', 'barrierWhite', 'flagCheckers', 'grandStand', 'grandStandCovered', 'tent', 'lightPostModern', 'billboard', 'pylon'];
 
 export const assets = { vehicles: {}, characters: {}, nature: {}, racing: {}, ready: false };

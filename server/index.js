@@ -3,6 +3,7 @@ const path = require('path');
 const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
+const crypto = require('crypto');
 const { RoomManager } = require('./rooms.js');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
@@ -22,6 +23,22 @@ router.use('/vendor/three', express.static(path.join(__dirname, '..', 'node_modu
 router.use('/models', express.static(path.join(__dirname, '..', 'public', 'models'), { maxAge: '7d', immutable: false }));
 router.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '5m', etag: true }));
 router.get('/healthz', (req, res) => res.json({ ok: true, rooms: manager.rooms.size, players: manager.players.size }));
+
+router.get('/config', (req, res) => res.json({ httpsUrl: process.env.PUBLIC_HTTPS_URL || null }));
+
+// WebRTC ICE 設定：STUN + （若有設定）自架 TURN，TURN 憑證為 12 小時有效的暫時憑證
+router.get('/ice', (req, res) => {
+  const iceServers = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+  const secret = process.env.TURN_SECRET;
+  const host = process.env.TURN_HOST;
+  if (secret && host) {
+    const username = `${Math.floor(Date.now() / 1000) + 12 * 3600}:mario`;
+    const credential = crypto.createHmac('sha1', secret).update(username).digest('base64');
+    iceServers.push({ urls: [`turn:${host}:3478?transport=udp`, `turn:${host}:3478?transport=tcp`], username, credential });
+  }
+  res.set('Cache-Control', 'no-store');
+  res.json({ iceServers });
+});
 
 if (BASE) {
   // 注意：Express 的 app.get('/mario') 也會匹配 '/mario/'，所以要用精確比對，否則會無限轉址
@@ -73,6 +90,10 @@ io.on('connection', (socket) => {
   socket.on('race:use', (payload, cb) => reply(cb, manager.raceAction(socket.id, 'use', payload)));
   socket.on('race:hit', (payload, cb) => reply(cb, manager.raceAction(socket.id, 'hit', payload)));
   socket.on('game:sync', (cb) => reply(cb, manager.getState(socket.id)));
+  // 語音對話訊號交換
+  socket.on('voice:join', (cb) => reply(cb, manager.voiceJoin(socket.id)));
+  socket.on('voice:leave', () => manager.voiceLeave(socket.id));
+  socket.on('voice:signal', (payload) => manager.voiceSignal(socket.id, payload));
 
   socket.on('chat', (text) => {
     const p = manager.players.get(socket.id);

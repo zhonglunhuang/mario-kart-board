@@ -1,5 +1,7 @@
 import { RaceScene } from './scene.js';
 import { loadAssets, assets } from './models.js';
+import { audio } from './audio.js';
+import { VoiceChat } from './voice.js';
 import { RaceController } from './race.js';
 
 const DEFS = window.DEFS;
@@ -22,6 +24,9 @@ const state = {
   room: null,
   scene: null,
   race: null,
+  createMap: DEFS.DEFAULT_MAP,
+  voice: null,
+  config: {},
   get isMobile() {
     return window.matchMedia('(max-width: 720px)').matches;
   },
@@ -47,6 +52,26 @@ function charOf(id) {
 }
 function kartOf(id) {
   return DEFS.KARTS.find((k) => k.id === id) || DEFS.KARTS[0];
+}
+function mapOf(id) {
+  return DEFS.MAPS[id] || DEFS.MAPS[DEFS.DEFAULT_MAP];
+}
+function mapLabel(id) {
+  const m = mapOf(id);
+  return `${m.emoji} ${m.name}`;
+}
+function renderMapGrid() {
+  const g = $('#map-grid');
+  g.innerHTML = '';
+  for (const m of Object.values(DEFS.MAPS)) {
+    const d = el('div', 'pick map' + (m.id === state.createMap ? ' selected' : ''));
+    d.innerHTML = `<div class="kart-emoji">${m.emoji}</div><div>${esc(m.name)}</div><div class="desc">${'★'.repeat(m.difficulty)}${'☆'.repeat(3 - m.difficulty)}<br>${esc(m.desc)}</div>`;
+    d.onclick = () => {
+      state.createMap = m.id;
+      renderMapGrid();
+    };
+    g.appendChild(d);
+  }
 }
 function avatarHtml(charId, sm) {
   const c = charOf(charId);
@@ -155,7 +180,7 @@ function renderRooms(rooms) {
     row.innerHTML = `
       <div class="info">
         <div class="name">${esc(r.name)}</div>
-        <div class="sub">房主 ${esc(r.hostName)} · ${r.laps} 圈 · ${r.count}/${r.maxPlayers} 人</div>
+        <div class="sub">${mapLabel(r.map)} · ${r.laps} 圈 · ${r.count}/${r.maxPlayers} 人 · 房主 ${esc(r.hostName)}</div>
       </div>
       <span class="badge ${playing ? 'playing' : full ? 'warn' : 'ok'}">${playing ? '比賽中' : full ? '已滿' : '等待中'}</span>`;
     const btn = el('button', 'btn small', '加入');
@@ -173,11 +198,12 @@ socket.on('rooms', renderRooms);
 $('#btn-refresh').onclick = () => socket.emit('rooms:list', renderRooms);
 $('#btn-open-create').onclick = () => {
   $('#in-room-name').value = `${state.me.name} 的房間`;
+  renderMapGrid();
   $('#dlg-create').classList.remove('hidden');
 };
 $('#btn-cancel-create').onclick = () => $('#dlg-create').classList.add('hidden');
 $('#btn-create').onclick = async () => {
-  const res = await emit('room:create', { name: $('#in-room-name').value, laps: $('#in-room-laps').value, maxPlayers: $('#in-room-max').value });
+  const res = await emit('room:create', { name: $('#in-room-name').value, laps: $('#in-room-laps').value, maxPlayers: $('#in-room-max').value, map: state.createMap });
   if (res?.error) return toast(res.error);
   $('#dlg-create').classList.add('hidden');
   enterRoom(res.room);
@@ -186,7 +212,7 @@ $('#btn-create').onclick = async () => {
 /* ---------- 房間 ---------- */
 function enterRoom(room) {
   state.room = room;
-  ensureScene().catch((e) => console.error('模型載入失敗', e));
+  preloadAssets().catch(() => {});
   $('#room-chat-log').innerHTML = '';
   renderRoom();
   showScreen('screen-room');
@@ -196,7 +222,8 @@ function renderRoom() {
   if (!r) return;
   const isHost = r.hostId === state.me.id;
   $('#room-title').textContent = r.name;
-  $('#room-meta').textContent = `${r.laps} 圈 · ${r.players.length}/${r.maxPlayers} 人 · 房號 ${r.id}`;
+  $('#room-meta').textContent = `${mapLabel(r.map)} · ${r.laps} 圈 · ${r.players.length}/${r.maxPlayers} 人 · 房號 ${r.id}`;
+  const voiceSet = new Set(r.voice || []);
   const list = $('#room-players');
   list.innerHTML = '';
   for (const p of r.players) {
@@ -204,7 +231,7 @@ function renderRoom() {
     const k = kartOf(p.kart);
     const row = el('div', 'player-row');
     row.innerHTML = `${avatarHtml(p.character, true)}
-      <div class="info"><div class="name">${esc(p.name)}${p.id === state.me.id ? ' (你)' : ''}</div>
+      <div class="info"><div class="name">${esc(p.name)}${p.id === state.me.id ? ' (你)' : ''}${voiceSet.has(p.id) ? ' 🎤' : ''}</div>
       <div class="sub">${esc(c.name)} · ${k.emoji} ${esc(k.name)}</div></div>
       ${p.isHost ? '<span class="badge warn">👑 房主</span>' : `<span class="badge ${p.ready ? 'ok' : ''}">${p.ready ? '✅ 已準備' : '等待中'}</span>`}`;
     list.appendChild(row);
@@ -216,6 +243,8 @@ function renderRoom() {
   $('#room-host-settings').classList.toggle('hidden', !isHost);
   $('#in-set-laps').value = String(r.laps);
   $('#in-set-max').value = String(r.maxPlayers);
+  $('#in-set-map').value = r.map || DEFS.DEFAULT_MAP;
+  renderVoiceUI();
   $('#btn-ready').classList.toggle('hidden', isHost);
   $('#btn-ready').textContent = me?.ready ? '取消準備' : '✅ 準備';
   $('#btn-start').classList.toggle('hidden', !isHost);
@@ -247,7 +276,9 @@ $('#btn-start').onclick = async () => {
 };
 $('#in-set-laps').onchange = (e) => socket.emit('room:settings', { laps: e.target.value }, (r) => r?.error && toast(r.error));
 $('#in-set-max').onchange = (e) => socket.emit('room:settings', { maxPlayers: e.target.value }, (r) => r?.error && toast(r.error));
+$('#in-set-map').onchange = (e) => socket.emit('room:settings', { map: e.target.value }, (r) => r?.error && toast(r.error));
 $('#btn-leave-room').onclick = async () => {
+  state.voice?.leave();
   await emit('room:leave');
   state.room = null;
   showScreen('screen-lobby');
@@ -312,21 +343,28 @@ function preloadAssets() {
   });
 }
 let scenePromise = null;
-function ensureScene() {
-  if (!scenePromise) {
-    if (!assets.ready) $('#asset-progress').classList.remove('hidden');
-    scenePromise = preloadAssets()
-      .then(() => RaceScene.create($('#gl'), { mobile: state.isMobile }))
-      .then((scene) => {
-        state.scene = scene;
-        return scene;
-      })
-      .catch((e) => {
-        scenePromise = null;
-        toast('無法初始化 3D 畫面：' + (e?.message || e), 5000);
-        throw e;
-      });
-  }
+let scenePromiseMap = null;
+function ensureScene(mapId = DEFS.DEFAULT_MAP) {
+  if (scenePromise && scenePromiseMap === mapId) return scenePromise;
+  if (!assets.ready) $('#asset-progress').classList.remove('hidden');
+  scenePromiseMap = mapId;
+  scenePromise = preloadAssets()
+    .then(() => {
+      if (state.scene) {
+        state.scene.dispose();
+        state.scene = null;
+      }
+      return RaceScene.create($('#gl'), { mobile: state.isMobile, map: mapId });
+    })
+    .then((scene) => {
+      state.scene = scene;
+      return scene;
+    })
+    .catch((e) => {
+      scenePromise = null;
+      toast('無法初始化 3D 畫面：' + (e?.message || e), 5000);
+      throw e;
+    });
   return scenePromise;
 }
 
@@ -335,14 +373,18 @@ async function startGame(payload) {
   $('#dlg-result').classList.add('hidden');
   $('#game-chat-log').innerHTML = '';
   $('#hud-help').classList.add('hidden');
-  $('#chat-overlay').classList.toggle('open', !state.isMobile);
-  if (!state.scene) $('#dlg-loading').classList.remove('hidden');
-  const scene = await ensureScene();
+  $('#chat-overlay').classList.toggle('open', !state.isTouch && !state.isMobile);
+  const mapId = payload.state.map || payload.room.map || DEFS.DEFAULT_MAP;
+  if (!state.scene || state.scene.mapId !== mapId) $('#dlg-loading').classList.remove('hidden');
+  const scene = await ensureScene(mapId);
   $('#dlg-loading').classList.add('hidden');
   if (state.race) state.race.destroy();
   showScreen('screen-game');
   scene.resize();
-  state.race = new RaceController({ scene, socket, meId: state.me.id, state: payload.state, room: payload.room, isTouch: state.isTouch });
+  audio.unlock();
+  audio.engineStart();
+  state.race = new RaceController({ scene, socket, meId: state.me.id, state: payload.state, room: payload.room, isTouch: state.isTouch, audio });
+  renderVoiceUI();
   if (document.documentElement.requestFullscreen && state.isTouch) {
     document.documentElement.requestFullscreen().catch(() => {});
   }
@@ -387,12 +429,80 @@ $('#btn-help-close').onclick = () => $('#hud-help').classList.add('hidden');
 $('#btn-chat').onclick = () => $('#chat-overlay').classList.toggle('open');
 $('#btn-quit').onclick = async () => {
   if (!confirm('確定要退出比賽嗎？')) return;
+  state.voice?.leave();
   await emit('room:leave');
   leaveRaceView();
   state.room = null;
   showScreen('screen-lobby');
   socket.emit('rooms:list', renderRooms);
 };
+
+/* ---------- 音效 / 語音 ---------- */
+function renderAudioUI() {
+  for (const b of document.querySelectorAll('.btn-mute')) b.textContent = audio.muted ? '🔇' : '🔊';
+  const v = $('#btn-announcer');
+  if (v) v.textContent = `播報：${audio.voiceOn ? '開' : '關'}`;
+}
+for (const b of document.querySelectorAll('.btn-mute')) {
+  b.onclick = () => {
+    audio.unlock();
+    audio.setMuted(!audio.muted);
+    renderAudioUI();
+  };
+}
+$('#btn-announcer').onclick = () => {
+  audio.setVoice(!audio.voiceOn);
+  renderAudioUI();
+  if (audio.voiceOn) audio.say('播報已開啟');
+};
+document.addEventListener('pointerdown', () => audio.unlock(), { once: true });
+
+state.voice = new VoiceChat(socket, { onState: () => renderVoiceUI() });
+function renderVoiceUI() {
+  const st = state.voice.status();
+  const ok = state.voice.supported && state.voice.secure;
+  for (const b of document.querySelectorAll('.btn-voice')) {
+    b.disabled = !ok;
+    b.title = ok ? '' : '語音需要 HTTPS 網址';
+    b.textContent = !ok ? '🎤 語音需 HTTPS' : !st.joined ? '🎤 加入語音' : st.muted ? '🔇 已靜音（點擊開麥）' : `🎙️ 開麥中（${st.connected}/${st.peers} 人連線）`;
+    b.classList.toggle('live', st.joined && !st.muted);
+  }
+  for (const b of document.querySelectorAll('.btn-voice-leave')) b.classList.toggle('hidden', !st.joined);
+  const mic = $('#btn-mic');
+  if (mic) {
+    mic.textContent = !st.joined ? '🎤' : st.muted ? '🔇' : '🎙️';
+    mic.classList.toggle('live', st.joined && !st.muted);
+    mic.disabled = !ok;
+  }
+  const hint = $('#https-hint');
+  if (hint) hint.classList.toggle('hidden', ok || !state.config.httpsUrl);
+}
+async function toggleVoice() {
+  audio.unlock();
+  try {
+    if (!state.voice.joined) {
+      await state.voice.join();
+      toast('🎙️ 已加入語音，房間裡的人可以聽到你');
+    } else {
+      state.voice.setMuted(!state.voice.muted);
+    }
+  } catch (e) {
+    toast(e?.message || '無法開啟麥克風', 4000);
+  }
+  renderVoiceUI();
+}
+for (const b of document.querySelectorAll('.btn-voice')) b.onclick = toggleVoice;
+for (const b of document.querySelectorAll('.btn-voice-leave')) b.onclick = () => state.voice.leave();
+$('#btn-mic').onclick = toggleVoice;
+fetch(`${BASE}/config`)
+  .then((r) => r.json())
+  .then((c) => {
+    state.config = c || {};
+    const a = $('#https-link');
+    if (a && c.httpsUrl) a.href = c.httpsUrl;
+    renderVoiceUI();
+  })
+  .catch(() => {});
 
 /* ---------- 連線 ---------- */
 socket.on('connect', () => {
@@ -437,6 +547,8 @@ $('#btn-enter').addEventListener('click', startPreload, { once: true });
 loadProfile();
 $('#in-name').value = state.me.name;
 renderPickers();
+renderAudioUI();
+renderVoiceUI();
 window.addEventListener('beforeunload', (e) => {
   if (state.race) {
     e.preventDefault();

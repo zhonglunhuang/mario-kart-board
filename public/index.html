@@ -85,6 +85,8 @@
     <div class="card">
       <h2>開新房間</h2>
       <label class="field">房間名稱 <input id="in-room-name" maxlength="20" placeholder="例如：晚上來一場" /></label>
+      <h3>選擇賽道</h3>
+      <div id="map-grid" class="grid karts"></div>
       <label class="field">圈數
         <select id="in-room-laps">
           <option value="1">1 圈（快速）</option>
@@ -117,6 +119,9 @@
       </header>
       <div id="room-players" class="list"></div>
       <div id="room-host-settings" class="row hidden">
+        <label class="field inline">賽道
+          <select id="in-set-map"><option value="meadow">🌳 綠野賽道</option><option value="canyon">🏜️ 峽谷沙漠</option><option value="alpine">🏔️ 雪山高地</option></select>
+        </label>
         <label class="field inline">圈數
           <select id="in-set-laps"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select>
         </label>
@@ -129,6 +134,13 @@
         <button id="btn-start" class="btn primary big hidden">🚦 開始比賽</button>
       </div>
       <p id="room-hint" class="muted small"></p>
+      <div class="row">
+        <button class="btn btn-voice">🎤 加入語音</button>
+        <button class="btn ghost btn-voice-leave hidden">離開語音</button>
+        <button class="btn ghost btn-mute">🔊</button>
+        <button id="btn-announcer" class="btn ghost">播報：開</button>
+      </div>
+      <p id="https-hint" class="muted small hidden">🔒 語音對話需要 HTTPS，請改用 <a id="https-link" href="#">安全網址</a> 開啟遊戲。</p>
       <div class="chat">
         <div id="room-chat-log" class="chat-log"></div>
         <form id="room-chat-form" class="chat-form">
@@ -147,6 +159,8 @@
       <div id="hud-fx" class="pill fx"></div>
       <div class="hud-actions">
         <button id="btn-standings" class="btn icon" title="排名">📋</button>
+        <button id="btn-mic" class="btn icon" title="語音">🎤</button>
+        <button class="btn icon btn-mute" title="音效">🔊</button>
         <button id="btn-chat" class="btn icon" title="聊天">💬</button>
         <button id="btn-help" class="btn icon" title="說明">❓</button>
         <button id="btn-quit" class="btn icon" title="退出">🚪</button>
@@ -165,6 +179,7 @@
       <h3>車種</h3>
       <div id="help-karts"></div>
       <p class="muted small">出界（草地）會減速；撞到護欄會損失速度；撿道具箱可獲得一個道具（落後者拿到更強的道具）。先跑完指定圈數的人獲勝。</p>
+      <div class="row"><button class="btn btn-voice">🎤 加入語音</button><button class="btn ghost btn-voice-leave hidden">離開語音</button><button id="btn-announcer-2" class="btn ghost hidden"></button></div>
       <button id="btn-help-close" class="btn ghost">關閉</button>
     </div>
 
@@ -175,6 +190,7 @@
     <div id="hud-right">
       <div id="hud-item" class="item-slot" title="使用道具">·</div>
     </div>
+    <div id="hud-item-name" class="pill item-name hidden"></div>
     <div id="hud-keys" class="muted small">← → 轉向 · ↑ 油門 · ↓ 煞車 · 空白鍵 道具</div>
 
     <div id="touch-controls" class="hidden">

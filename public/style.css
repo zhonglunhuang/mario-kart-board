@@ -298,3 +298,12 @@ select option { color: #000; }
 #asset-progress .progress { flex: 1; margin: 0; }
 .progress.slim { height: 6px; }
 #asset-bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.25s; }
+
+/* ---------- 地圖 / 道具名稱 / 語音 ---------- */
+.pick.map .desc { font-size: 11px; }
+.item-name { position: fixed; right: calc(12px + var(--safe-right)); bottom: calc(92px + var(--safe-bottom)); max-width: 260px; font-size: 12px; text-align: right; }
+.st-row .it { font-size: 14px; width: 18px; text-align: center; }
+.btn.live { background: rgba(67, 176, 71, 0.35); border-color: var(--ok); box-shadow: 0 0 12px rgba(67, 176, 71, 0.5); }
+@media (max-width: 720px) {
+  .item-name { right: auto; left: 50%; transform: translateX(-50%); bottom: calc(112px + var(--safe-bottom)); max-width: 80vw; text-align: center; }
+}

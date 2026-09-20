@@ -2,9 +2,7 @@ import * as THREE from 'three';
 
 /* 本地車輛物理、輸入、網路同步、HUD、小地圖 */
 const DEFS = window.DEFS;
-const T = DEFS.TRACK;
 const D = DEFS.DURATIONS;
-const HALF = T.width / 2;
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -22,8 +20,11 @@ function fmtTime(ms) {
 }
 
 export class RaceController {
-  constructor({ scene, socket, meId, state, room, isTouch, onOver }) {
+  constructor({ scene, socket, meId, state, room, isTouch, onOver, audio }) {
     this.scene = scene;
+    this.audio = audio;
+    this.lastBeep = null;
+    this.wasStar = false;
     this.socket = socket;
     this.meId = meId;
     this.isTouch = isTouch;
@@ -212,23 +213,31 @@ export class RaceController {
         this.phase = 'racing';
         this.center('GO!', 900);
         this.vibrate(60);
+        this.audio?.countdownBeep(0);
+        this.audio?.say('開始！', { priority: true });
         break;
       case 'item':
         if (ev.playerId === this.meId) {
           this.item = ev.item;
           this.flash(`拿到 ${I[ev.item].emoji} ${I[ev.item].name}`);
+          this.audio?.itemGet();
+          this.audio?.say(`拿到${I[ev.item].name}`);
         }
         break;
       case 'use':
         if (ev.playerId === this.meId) {
           if (ev.shellId) this.fireShell(ev.shellId, ev.kind, ev.targetId);
+          this.audio?.useItem(ev.item);
         } else {
+          if (ev.item !== 'star') this.audio?.click();
           this.flash(`${name(ev.playerId)} 使用了 ${I[ev.item].emoji} ${I[ev.item].name}`);
         }
         if (ev.item === 'lightning' && ev.victims?.includes(this.meId)) {
           this.eff.spinUntil = this.serverNow() + D.spinMs;
           this.center('⚡ 被閃電打中！', 1200);
           this.vibrate(150);
+          this.audio?.hit();
+          this.audio?.say('被閃電打中了！');
         }
         break;
       case 'hit':
@@ -237,18 +246,27 @@ export class RaceController {
           const what = ev.kind === 'banana' ? '🍌 踩到香蕉' : `${I[ev.item]?.emoji ?? '💥'} 被 ${name(ev.by)} 打中`;
           this.center(what, 1200);
           this.vibrate(150);
+          this.audio?.hit();
+          this.audio?.say(ev.kind === 'banana' ? '踩到香蕉了！' : '被打中了！');
         } else {
           this.flash(`${name(ev.playerId)} ${ev.kind === 'banana' ? '踩到香蕉' : '被擊中'}`);
         }
         break;
       case 'lap':
         if (ev.playerId === this.meId) {
-          this.center(ev.lap === this.laps - 1 ? '最後一圈！' : `第 ${ev.lap + 1} 圈`, 1500);
+          const last = ev.lap === this.laps - 1;
+          this.center(last ? '最後一圈！' : `第 ${ev.lap + 1} 圈`, 1500);
           this.vibrate(40);
+          this.audio?.lap();
+          this.audio?.say(last ? '最後一圈！' : `第${ev.lap + 1}圈`);
         }
         break;
       case 'finish':
         this.flash(`🏁 ${ev.name} 完賽，第 ${ev.rank} 名（${fmtTime(ev.time)}）`);
+        if (ev.playerId === this.meId) {
+          this.audio?.finish(ev.rank);
+          this.audio?.say(ev.rank === 1 ? '恭喜！第一名完賽！' : `完賽，第${ev.rank}名`, { priority: true });
+        } else this.audio?.click();
         break;
       case 'leave':
         this.flash(`${ev.name} 離開了比賽`);
@@ -299,10 +317,10 @@ export class RaceController {
       s.pos.addScaledVector(s.dir, s.speed * dt);
       const c = this.scene.closest(s.pos, s.hint);
       s.hint = c.idx;
-      if (Math.abs(c.lateral) > HALF) {
+      if (Math.abs(c.lateral) > this.scene.half) {
         const sign = Math.sign(c.lateral);
-        s.pos.x = c.center.x + c.right.x * sign * HALF;
-        s.pos.z = c.center.z + c.right.z * sign * HALF;
+        s.pos.x = c.center.x + c.right.x * sign * this.scene.half;
+        s.pos.z = c.center.z + c.right.z * sign * this.scene.half;
         const dot = s.dir.x * c.right.x + s.dir.z * c.right.z;
         s.dir.x -= 2 * dot * c.right.x;
         s.dir.z -= 2 * dot * c.right.z;
@@ -345,7 +363,7 @@ export class RaceController {
 
     const c0 = this.scene.closest(L.pos, L.hint);
     L.hint = c0.idx;
-    const offroad = Math.abs(c0.lateral) > HALF - 1.3;
+    const offroad = Math.abs(c0.lateral) > this.scene.half - 1.3;
 
     if (spinning) {
       L.speed = THREE.MathUtils.damp(L.speed, 0, 4, dt);
@@ -372,7 +390,7 @@ export class RaceController {
     // 護欄
     const c = this.scene.closest(L.pos, L.hint);
     L.hint = c.idx;
-    const limit = HALF - 0.2;
+    const limit = this.scene.half - 0.2;
     if (Math.abs(c.lateral) > limit) {
       const sign = Math.sign(c.lateral);
       L.pos.x = c.center.x + c.right.x * sign * limit;
@@ -381,6 +399,7 @@ export class RaceController {
         L.speed *= 0.55;
         L.wall = true;
         this.vibrate(30);
+        this.audio?.wall();
       }
       const tangYaw = Math.atan2(c.tangent.x, c.tangent.z);
       L.rot = lerpAngle(L.rot, tangYaw, Math.min(1, 4 * dt));
@@ -403,6 +422,7 @@ export class RaceController {
         if (!star && !k.pushed) {
           L.speed *= k.heavy && !kart.heavy ? 0.45 : 0.8;
           k.pushed = true;
+          this.audio?.bump();
         }
       } else {
         k.pushed = false;
@@ -431,8 +451,9 @@ export class RaceController {
         const dz = L.pos.z - bp.z;
         if (dx * dx + dz * dz < 2.6 * 2.6) {
           this.boxAvail[i] = false;
-          this.boxCooldown[i] = now + T.itemBoxRespawnMs;
+          this.boxCooldown[i] = now + DEFS.ITEM_BOX_RESPAWN_MS;
           this.scene.setBoxes(this.boxAvail);
+          this.audio?.pickup();
           this.socket.emit('race:pickup', { box: i }, () => {});
         }
       });
@@ -470,6 +491,7 @@ export class RaceController {
       ...this.remoteShells,
     ]);
     this.scene.chase(lk, dt, this.finished);
+    this.audio?.engineUpdate(Math.min(1, Math.abs(L.speed) / kart.maxSpeed), racing ? inp.gas : 0, boost);
 
     // 網路：每 50ms 回報
     if (nowP - this.lastSend > 50) {
@@ -519,24 +541,41 @@ export class RaceController {
     $('#hud-speed').textContent = `${Math.round(Math.abs(this.local.speed) * 2.6)} km/h`;
     const slot = $('#hud-item');
     const tcItem = $('#tc-item');
+    const nameEl = $('#hud-item-name');
     if (this.item) {
-      slot.textContent = DEFS.ITEMS[this.item].emoji;
+      const it = DEFS.ITEMS[this.item];
+      slot.textContent = it.emoji;
       slot.classList.add('usable');
-      slot.title = `${DEFS.ITEMS[this.item].name}：${DEFS.ITEMS[this.item].desc}`;
-      tcItem.textContent = DEFS.ITEMS[this.item].emoji;
+      slot.title = `${it.name}：${it.desc}`;
+      tcItem.textContent = it.emoji;
       tcItem.classList.add('usable');
+      nameEl.textContent = `${it.name}｜${it.desc}`;
+      nameEl.classList.remove('hidden');
     } else {
       slot.textContent = '·';
       slot.classList.remove('usable');
       slot.title = '沒有道具';
       tcItem.textContent = '🎁';
       tcItem.classList.remove('usable');
+      nameEl.classList.add('hidden');
     }
     // 倒數
     if (this.phase === 'countdown') {
       const left = Math.ceil((this.startAt - now) / 1000);
-      if (left > 0 && left <= 3) this.center(String(left), 0);
-      else if (left > 3) this.center('準備…', 0);
+      if (left > 0 && left <= 3) {
+        this.center(String(left), 0);
+        if (this.lastBeep !== left) {
+          this.lastBeep = left;
+          this.audio?.countdownBeep(left);
+          this.audio?.say(['', '一', '二', '三'][left], { priority: true });
+        }
+      } else if (left > 3) this.center('準備…', 0);
+    }
+    const starNow = now < this.eff.starUntil;
+    if (starNow !== this.wasStar) {
+      this.wasStar = starNow;
+      if (starNow) this.audio?.starStart();
+      else this.audio?.starStop();
     }
     // 排名列表
     const list = (this.snapPlayers || []).filter((p) => !p.dropped).sort((a, b) => a.standing - b.standing);
@@ -544,7 +583,8 @@ export class RaceController {
       .map((p) => {
         const ch = DEFS.CHARACTERS.find((c) => c.id === p.character);
         const status = p.finished ? `🏁 ${fmtTime(p.finishTime)}` : `第 ${Math.min(this.laps, p.lap + 1)} 圈`;
-        return `<div class="st-row${p.id === this.meId ? ' me' : ''}"><span class="rank">${p.standing}</span><span class="dot" style="background:${ch?.color}"></span><span class="name">${esc(p.name)}</span><span class="sub">${status}</span></div>`;
+        const item = p.item ? DEFS.ITEMS[p.item]?.emoji : '';
+        return `<div class="st-row${p.id === this.meId ? ' me' : ''}"><span class="rank">${p.standing}</span><span class="dot" style="background:${ch?.color}"></span><span class="name">${esc(p.name)}</span><span class="it">${item}</span><span class="sub">${status}</span></div>`;
       })
       .join('');
     this.renderMsgs();
@@ -617,6 +657,7 @@ export class RaceController {
 
   destroy() {
     this.destroyed = true;
+    this.audio?.engineStop();
     this.scene.onFrame = null;
     window.removeEventListener('keydown', this.onKey);
     window.removeEventListener('keyup', this.onKey);

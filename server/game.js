@@ -3,7 +3,6 @@
  * 車輛物理由各客戶端自己模擬並回報位置；伺服器負責裁判與同步。 */
 const DEFS = require('../public/shared/defs.js');
 
-const T = DEFS.TRACK;
 const D = DEFS.DURATIONS;
 const ITEM_IDS = Object.keys(DEFS.ITEMS);
 const TICK_MS = 50;
@@ -26,7 +25,10 @@ class Race {
    * @param {{laps:number, emit:(event:string,payload:any)=>void, onOver:()=>void}} opts
    */
   constructor(roster, opts) {
-    this.laps = Math.min(9, Math.max(1, opts.laps || T.laps));
+    this.map = DEFS.MAPS[opts.map] ? opts.map : DEFS.DEFAULT_MAP;
+    const M = DEFS.MAPS[this.map];
+    this.checkpoints = M.checkpoints;
+    this.laps = Math.min(9, Math.max(1, opts.laps || 3));
     this.emit = opts.emit;
     this.onOver = opts.onOver;
     this.players = new Map();
@@ -47,7 +49,7 @@ class Race {
       });
     });
     this.bananas = new Map();
-    this.boxes = T.itemBoxes.map(() => 0); // 0 = 可撿；否則為重生時間
+    this.boxes = M.itemBoxes.map(() => 0); // 0 = 可撿；否則為重生時間
     this.nextId = 1;
     this.phase = 'countdown';
     this.startAt = now() + D.countdownMs;
@@ -103,7 +105,7 @@ class Race {
     p.prevT = prev;
     p.t = t;
     // 檢查點（依序經過 0.25 / 0.5 / 0.75）
-    const cp = T.checkpoints;
+    const cp = this.checkpoints;
     if (p.checkpoint < cp.length && prev < cp[p.checkpoint] && t >= cp[p.checkpoint] && t - prev < 0.3) {
       p.checkpoint++;
     }
@@ -157,7 +159,7 @@ class Race {
     const i = parseInt(boxIndex, 10);
     if (!(i >= 0 && i < this.boxes.length)) return { error: '道具箱不存在' };
     if (this.boxes[i] > now()) return { error: '道具箱尚未重生' };
-    this.boxes[i] = now() + T.itemBoxRespawnMs;
+    this.boxes[i] = now() + DEFS.ITEM_BOX_RESPAWN_MS;
     this.emit('race:event', { type: 'box', index: i, playerId: id });
     if (p.item) return { ok: true, item: p.item };
     const n = this.active().length;
@@ -294,6 +296,7 @@ class Race {
     });
     return {
       now: t,
+      map: this.map,
       phase: this.phase,
       startAt: this.startAt,
       laps: this.laps,
