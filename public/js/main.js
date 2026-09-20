@@ -1,4 +1,5 @@
 import { RaceScene } from './scene.js';
+import { loadAssets, assets } from './models.js';
 import { RaceController } from './race.js';
 
 const DEFS = window.DEFS;
@@ -277,18 +278,54 @@ socket.on('chat', (m) => {
 });
 
 /* ---------- 比賽 ---------- */
+/* ---------- 啟動畫面 / 模型預載 ---------- */
+const splash = {
+  status(text) {
+    const el = $('#splash-status');
+    if (el) el.textContent = text;
+  },
+  bar(p) {
+    const el = $('#splash-bar');
+    if (el) el.style.width = `${Math.round(p * 100)}%`;
+  },
+  hide() {
+    const el = $('#splash');
+    if (el) el.style.display = 'none';
+    clearTimeout(window.__splashTimer);
+  },
+};
+let assetProgress = 0;
+function preloadAssets() {
+  return loadAssets((p) => {
+    assetProgress = p;
+    const bar = $('#asset-bar');
+    if (bar) bar.style.width = `${Math.round(p * 100)}%`;
+    const txt = $('#asset-progress-text');
+    if (txt) txt.textContent = `3D 模型載入中 ${Math.round(p * 100)}%`;
+    const lb = $('#load-bar');
+    if (lb) lb.style.width = `${Math.round(p * 100)}%`;
+    if (p >= 1) setTimeout(() => $('#asset-progress').classList.add('hidden'), 800);
+  }).catch((e) => {
+    console.error('模型載入失敗', e);
+    toast('3D 模型載入失敗，請重新整理', 4000);
+    throw e;
+  });
+}
 let scenePromise = null;
 function ensureScene() {
   if (!scenePromise) {
-    scenePromise = RaceScene.create($('#gl'), {
-      mobile: state.isMobile,
-      onProgress: (p) => {
-        $('#load-bar').style.width = `${Math.round(p * 100)}%`;
-      },
-    }).then((scene) => {
-      state.scene = scene;
-      return scene;
-    });
+    if (!assets.ready) $('#asset-progress').classList.remove('hidden');
+    scenePromise = preloadAssets()
+      .then(() => RaceScene.create($('#gl'), { mobile: state.isMobile }))
+      .then((scene) => {
+        state.scene = scene;
+        return scene;
+      })
+      .catch((e) => {
+        scenePromise = null;
+        toast('無法初始化 3D 畫面：' + (e?.message || e), 5000);
+        throw e;
+      });
   }
   return scenePromise;
 }
@@ -360,6 +397,9 @@ $('#btn-quit').onclick = async () => {
 /* ---------- 連線 ---------- */
 socket.on('connect', () => {
   $('#conn-status').textContent = '已連線到伺服器';
+  splash.status('已連線，準備完成');
+  splash.bar(1);
+  setTimeout(() => splash.hide(), 150);
   if (state.entered) {
     socket.emit('join', { name: state.me.name, character: state.me.character, kart: state.me.kart }, (res) => {
       if (res?.playerId) state.me.id = res.playerId;
@@ -379,10 +419,21 @@ socket.on('disconnect', () => {
 });
 socket.on('connect_error', () => {
   $('#conn-status').textContent = '無法連線到伺服器，重試中…';
+  splash.status('無法連線到伺服器，重試中…');
 });
 
 /* ---------- 啟動 ---------- */
 window.__debug = { state, DEFS };
+splash.status('連線伺服器…');
+splash.bar(0.6);
+// 5 秒內沒連上也先讓玩家看到畫面（之後會自動重連）
+setTimeout(() => splash.hide(), 5000);
+// 進到大廳後就在背景預載 3D 模型，開始比賽時就不用等
+const startPreload = () => {
+  $('#asset-progress').classList.remove('hidden');
+  preloadAssets().catch(() => {});
+};
+$('#btn-enter').addEventListener('click', startPreload, { once: true });
 loadProfile();
 $('#in-name').value = state.me.name;
 renderPickers();

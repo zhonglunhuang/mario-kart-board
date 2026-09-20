@@ -13,12 +13,38 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="style.css" />
+  <link rel="modulepreload" href="vendor/three/build/three.module.min.js" />
+  <link rel="modulepreload" href="js/main.js" />
   <script type="importmap">
-    { "imports": { "three": "./vendor/three/build/three.module.js", "three/addons/": "./vendor/three/examples/jsm/" } }
+    { "imports": { "three": "./vendor/three/build/three.module.min.js", "three/addons/": "./vendor/three/examples/jsm/" } }
   </script>
 </head>
 <body>
+  <!-- 啟動畫面：純 HTML/CSS，JS 還沒載入就會顯示 -->
+  <div id="splash">
+    <div class="splash-box">
+      <div class="splash-logo">🏁</div>
+      <h1>賽車 Online</h1>
+      <div class="spinner"></div>
+      <div id="splash-status">載入遊戲程式…</div>
+      <div class="progress"><div id="splash-bar"></div></div>
+      <div id="splash-hint" class="muted small">第一次開啟需要下載約 4 MB，之後會快取。</div>
+      <button id="splash-retry" class="btn ghost hidden" onclick="location.reload()">重新載入</button>
+    </div>
+  </div>
+  <noscript><div class="splash-box">需要啟用 JavaScript 才能遊玩。</div></noscript>
+  <script>
+    // 15 秒還沒接管畫面就提示重新整理
+    window.__splashTimer = setTimeout(function () {
+      var st = document.getElementById('splash-status');
+      if (st && document.getElementById('splash') && document.getElementById('splash').style.display !== 'none') {
+        st.textContent = '載入時間較長，可能是網路較慢或瀏覽器不支援 WebGL';
+        document.getElementById('splash-retry').classList.remove('hidden');
+      }
+    }, 15000);
+  </script>
   <canvas id="gl"></canvas>
+  <div id="asset-progress" class="hidden"><span id="asset-progress-text">3D 模型載入中</span><div class="progress slim"><div id="asset-bar"></div></div></div>
 
   <!-- 玩家設定 -->
   <section id="screen-profile" class="screen">

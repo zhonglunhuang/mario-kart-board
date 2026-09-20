@@ -19,6 +19,7 @@ app.set('trust proxy', true);
 
 const router = express.Router();
 router.use('/vendor/three', express.static(path.join(__dirname, '..', 'node_modules', 'three'), { maxAge: '7d' }));
+router.use('/models', express.static(path.join(__dirname, '..', 'public', 'models'), { maxAge: '7d', immutable: false }));
 router.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '5m', etag: true }));
 router.get('/healthz', (req, res) => res.json({ ok: true, rooms: manager.rooms.size, players: manager.players.size }));
 

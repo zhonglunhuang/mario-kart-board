@@ -285,3 +285,16 @@ select option { color: #000; }
 .card.loading { text-align: center; }
 .progress { height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.12); overflow: hidden; margin: 12px 0; }
 #load-bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.2s; }
+
+/* ---------- 啟動畫面 / 預載進度 ---------- */
+#splash { position: fixed; inset: 0; z-index: 200; background: radial-gradient(circle at 50% 30%, #2a2c5a, #12122a 70%); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.splash-box { text-align: center; max-width: 360px; width: 100%; }
+.splash-logo { font-size: 64px; }
+.spinner { width: 34px; height: 34px; border: 4px solid rgba(255,255,255,0.2); border-top-color: var(--accent); border-radius: 50%; margin: 14px auto; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#splash-status { font-weight: 700; margin-bottom: 8px; }
+#splash-bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.25s; }
+#asset-progress { position: fixed; left: 0; right: 0; top: 0; z-index: 150; padding: 6px 12px; background: rgba(0,0,0,0.6); font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 10px; backdrop-filter: blur(6px); }
+#asset-progress .progress { flex: 1; margin: 0; }
+.progress.slim { height: 6px; }
+#asset-bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.25s; }
